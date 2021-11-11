@@ -386,8 +386,6 @@ int tfa98xx_cal_init(struct class *tfa_class)
 {
 	int ret = 0;
 
-	if (!tfa_class)
-		tfa_class = class_create(THIS_MODULE, TFA_CLASS_NAME);
 	if (tfa_class) {
 		tfa_cal_dev = device_create(tfa_class,
 			NULL, DEV_ID_TFA_CAL, NULL, TFA_CAL_DEV_NAME);
@@ -397,8 +395,6 @@ int tfa98xx_cal_init(struct class *tfa_class)
 			if (ret)
 				pr_err("%s: failed to create sysfs group. ret (%d)\n",
 					__func__, ret);
-		} else {
-			class_destroy(tfa_class);
 		}
 	}
 

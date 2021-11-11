@@ -98,7 +98,6 @@ static unsigned int sr_converted = 48000;
 #define TFA98XX_FORMATS	(SNDRV_PCM_FMTBIT_S16_LE | \
 SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
-#define USE_DIRECT_API_CALL
 #undef TFA_RETRY_TO_START
 #if defined(TFA_RETRY_TO_START)
 #define TF98XX_MAX_DSP_START_TRY_COUNT	10
@@ -2436,7 +2435,7 @@ static int tfa98xx_set_device_ctl(struct snd_kcontrol *kcontrol,
 			pr_info("%s: [%d] deactivate channel\n",
 				__func__, dev);
 			cancel_delayed_work_sync(&tfa98xx->monitor_work);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 			cancel_delayed_work_sync(&tfa98xx->init_work);
 #endif
 			_tfa98xx_stop(tfa98xx);
@@ -2533,7 +2532,7 @@ static int tfa98xx_set_stop_ctl(struct snd_kcontrol *kcontrol,
 
 		if ((ucontrol->value.integer.value[i] != 0) && ready) {
 			cancel_delayed_work_sync(&tfa98xx->monitor_work);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 			cancel_delayed_work_sync(&tfa98xx->init_work);
 #endif
 			_tfa98xx_stop(tfa98xx);
@@ -2746,7 +2745,7 @@ static int tfa98xx_set_pause_ctl(struct snd_kcontrol *kcontrol,
 			pr_info("%s: [%d] pause channel\n",
 				__func__, dev);
 			cancel_delayed_work_sync(&tfa98xx->monitor_work);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 			cancel_delayed_work_sync(&tfa98xx->init_work);
 #endif
 			_tfa98xx_stop(tfa98xx);
@@ -4053,7 +4052,7 @@ static void tfa98xx_monitor(struct work_struct *work)
 		if (tfa98xx->dsp_init == TFA98XX_DSP_INIT_DONE) {
 			tfa98xx->dsp_init = TFA98XX_DSP_INIT_RECOVER;
 			tfa98xx_set_dsp_configured(tfa98xx);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 			queue_delayed_work(tfa98xx->tfa98xx_wq,
 				&tfa98xx->init_work, 0);
 #else
@@ -4165,7 +4164,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 			dev_dbg(tfa98xx->dev,
 				"tfa_dev_start success (%d)\n",
 				tfa98xx->init_count);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 			/* cancel other pending init works */
 			cancel_delayed_work(&tfa98xx->init_work);
 #endif
@@ -4180,7 +4179,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 #if defined(TFA_BYPASS_AT_START_FAILURE)
 		sync = true; /* unmute by force, even if it fails */
 #endif
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 		/* cancel other pending init works */
 		cancel_delayed_work(&tfa98xx->init_work);
 #endif
@@ -4202,7 +4201,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 #if defined(TFA_BYPASS_AT_START_FAILURE)
 		sync = true; /* unmute by force, even if it fails */
 #endif
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 		/* cancel other pending init works */
 		cancel_delayed_work(&tfa98xx->init_work);
 #endif
@@ -4216,7 +4215,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 		dev_dbg(tfa98xx->dev,
 			"tfa_dev_start success (%d)\n",
 			tfa98xx->init_count);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 		/* cancel other pending init works */
 		cancel_delayed_work(&tfa98xx->init_work);
 #endif
@@ -4233,7 +4232,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 
 		/* reschedule this init work for later */
 		list_for_each_entry(ntfa98xx, &tfa98xx_device_list, list) {
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 			queue_delayed_work(ntfa98xx->tfa98xx_wq,
 				&ntfa98xx->init_work,
 				msecs_to_jiffies(5));
@@ -4315,7 +4314,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 	mutex_unlock(&tfa98xx_mutex);
 }
 
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 static void tfa98xx_dsp_init_work(struct work_struct *work)
 {
 	struct tfa98xx *tfa98xx
@@ -4600,6 +4599,12 @@ static int tfa98xx_hw_params(struct snd_pcm_substream *substream,
 	if (no_start != 0)
 		return 0;
 
+#if defined(TFA_FIXED_RATE_FOR_DSP)
+	pr_info("%s: forced to change rate: %d to %d\n",
+		__func__, rate, sr_converted);
+	rate = sr_converted;
+#endif
+
 #if defined(TFA_CHANGE_PCM_FORMAT)
 	/* Assume signed / little endian by default */
 	/*
@@ -4617,11 +4622,6 @@ static int tfa98xx_hw_params(struct snd_pcm_substream *substream,
 		tfa98xx->sample_size = sample_size;
 		tfa98xx->slot_size = slot_size;
 	}
-#endif
-
-#if defined(TFA_FIXED_RATE_FOR_DSP)
-	pr_info("forced to change rate: %d to %d\n", rate, sr_converted);
-	rate = sr_converted;
 #endif
 
 	/* check if samplerate is supported for this mixer profile */
@@ -4728,7 +4728,7 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 		mutex_unlock(&tfa98xx_mutex);
 
 		cancel_delayed_work_sync(&tfa98xx->monitor_work);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 		cancel_delayed_work_sync(&tfa98xx->init_work);
 #endif
 		_tfa98xx_stop(tfa98xx);
@@ -4767,7 +4767,7 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 
 		/* Start DSP */
 		pr_info("%s: start tfa amp\n", __func__);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 		if (tfa98xx->dsp_init != TFA98XX_DSP_INIT_PENDING)
 			queue_delayed_work(tfa98xx->tfa98xx_wq,
 				&tfa98xx->init_work, 0);
@@ -4844,13 +4844,13 @@ static int tfa98xx_probe(struct snd_soc_component *component)
 	if (!tfa98xx->tfa98xx_wq)
 		return -ENOMEM;
 
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	tfa98xx->tfa->tfacal_wq = create_singlethread_workqueue("tfacal");
 	if (!tfa98xx->tfa->tfacal_wq)
 		return -ENOMEM;
 #endif
 
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 	INIT_DELAYED_WORK(&tfa98xx->init_work, tfa98xx_dsp_init_work);
 #endif
 	INIT_DELAYED_WORK(&tfa98xx->monitor_work, tfa98xx_monitor);
@@ -4894,7 +4894,7 @@ static void tfa98xx_remove(struct snd_soc_component *component)
 
 	cancel_delayed_work_sync(&tfa98xx->interrupt_work);
 	cancel_delayed_work_sync(&tfa98xx->monitor_work);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 	cancel_delayed_work_sync(&tfa98xx->init_work);
 #endif
 #if (defined(USE_TFA9891) || defined(USE_TFA9912))
@@ -4904,7 +4904,7 @@ static void tfa98xx_remove(struct snd_soc_component *component)
 	if (tfa98xx->tfa98xx_wq)
 		destroy_workqueue(tfa98xx->tfa98xx_wq);
 
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	if (tfa98xx->tfa->tfacal_wq)
 		destroy_workqueue(tfa98xx->tfa->tfacal_wq);
 #endif
@@ -6218,7 +6218,7 @@ static int tfa98xx_i2c_remove(struct i2c_client *i2c)
 
 	cancel_delayed_work_sync(&tfa98xx->interrupt_work);
 	cancel_delayed_work_sync(&tfa98xx->monitor_work);
-#if !defined(USE_DIRECT_API_CALL)
+#if !defined(TFA_USE_DIRECT_API_CALL)
 	cancel_delayed_work_sync(&tfa98xx->init_work);
 #endif
 #if (defined(USE_TFA9891) || defined(USE_TFA9912))

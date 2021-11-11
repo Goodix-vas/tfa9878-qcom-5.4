@@ -219,7 +219,7 @@ struct tfa_device {
 #if defined(TFA_USE_WAITQUEUE_SEQ)
 	wait_queue_head_t waitq_seq;
 #endif
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	struct workqueue_struct *tfacal_wq;
 	struct delayed_work wait_cal_work;
 #endif

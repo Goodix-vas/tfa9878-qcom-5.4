@@ -951,7 +951,7 @@ static enum tfa98xx_error tfa9878_specific(struct tfa_device *tfa)
 		/* -----  version 12 ----- */
 		reg_write(tfa, 0x01, 0x2e18); /* POR=0x2e88 */
 		reg_write(tfa, 0x02, 0x0628); /* POR=0x0008 */
-		reg_write(tfa, 0x04, 0x0240); /* POR=0x0340 */
+		reg_write(tfa, 0x04, 0x0241); /* POR=0x0340 */
 		reg_write(tfa, 0x52, 0x587c); /* POR=0x57dc */
 		reg_write(tfa, 0x61, 0x0183); /* POR=0x0a82 */
 		reg_write(tfa, 0x63, 0x055a); /* POR=0x0a9a */

@@ -74,7 +74,7 @@ static int config_count; /* check the number of configured devices */
 static int set_count; /* check the number of set devices */
 static int dsp_cal_value[MAX_CHANNELS] = {-1, -1};
 
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 static void tfa_wait_cal_work(struct work_struct *work);
 #endif
 #if defined(CHECK_CALIBRATION_DATA_RANGE)
@@ -84,7 +84,7 @@ static enum tfa98xx_error tfa_calibration_range_check(struct tfa_device *tfa,
 static enum tfa98xx_error tfa_process_re25(struct tfa_device *tfa);
 static enum tfa98xx_error _dsp_msg(struct tfa_device *tfa, int lastmessage);
 
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 /* enqueue work to separate thread after calibration */
 static void tfa_wait_cal_work(struct work_struct *work)
 {
@@ -120,7 +120,7 @@ static void tfa_wait_cal_work(struct work_struct *work)
 	}
 
 }
-#endif /* MPLATFORM */
+#endif /* TFA_WAIT_CAL_IN_WORKQUEUE */
 
 void tfa_handle_damaged_speakers(struct tfa_device *tfa)
 {
@@ -403,7 +403,7 @@ void tfa_set_query_info(struct tfa_device *tfa)
 	tfa->irq_all = 0;
 	tfa->irq_max = 0;
 
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	INIT_DELAYED_WORK(&tfa->wait_cal_work, tfa_wait_cal_work);
 #endif
 
@@ -2076,11 +2076,11 @@ enum tfa98xx_error dsp_msg(struct tfa_device *tfa,
 		pr_debug("\n");
 	}
 
-	if (tfa->convert_dsp32)
-		kmem_cache_free(tfa->cachep, intbuf);
-
 dsp_msg_error_exit:
 	tfa->individual_msg = 0;
+
+	if (tfa->convert_dsp32)
+		kmem_cache_free(tfa->cachep, intbuf);
 
 	return error;
 }
@@ -2208,7 +2208,7 @@ enum tfa98xx_error dsp_msg_read(struct tfa_device *tfa,
 			pr_debug("%s: OK\n", __func__);
 	} else {
 		pr_info("%s: skip if PSTREAM is lost\n", __func__);
-		return error;
+		goto dsp_msg_read_error_exit;
 	}
 
 	if (error != TFA98XX_ERROR_OK)
@@ -2233,11 +2233,13 @@ enum tfa98xx_error dsp_msg_read(struct tfa_device *tfa,
 			bytes24[idx++] = bytes[i + 1];
 			bytes24[idx++] = bytes[i + 0];
 		}
-
-		kmem_cache_free(tfa->cachep, bytes);
 	}
 
+dsp_msg_read_error_exit:
 	tfa->individual_msg = 0;
+
+	if (tfa->convert_dsp32)
+		kmem_cache_free(tfa->cachep, bytes);
 
 	return error;
 }
@@ -3402,7 +3404,7 @@ enum tfa98xx_error tfa_get_fw_api_version(struct tfa_device *tfa,
 #else
 	unsigned char buf[3] = {0};
 #endif /* TFA_CUSTOM_FORMAT_AT_RESPONSE */
-	int data;
+	int data[2], vitf;
 
 	if (tfa == NULL)
 		return TFA98XX_ERROR_BAD_PARAMETER;
@@ -3433,19 +3435,21 @@ enum tfa98xx_error tfa_get_fw_api_version(struct tfa_device *tfa,
 		}
 	}
 
-	tfa98xx_convert_bytes2data(res_len, buf, &data);
+	tfa98xx_convert_bytes2data(res_len, buf, data);
 #if defined(TFA_CUSTOM_FORMAT_AT_RESPONSE)
 	memcpy(pfw_version, buf + 3, 3);
+	vitf = data[1];
 #else
 	memcpy(pfw_version, buf, 3);
+	vitf = data[0];
 #endif /* TFA_CUSTOM_FORMAT_AT_RESPONSE */
 
 	pr_info("%s: fw api (itf) version %d.%d.%d.%d\n",
 		__func__,
-		(data & VERSION_BIG_M_FILTER) >> VERSION_BIG_M_INDEX,
-		(data & VERSION_SMALL_M_FILTER) >> VERSION_SMALL_M_INDEX,
-		(data & VERSION_BIG_U_FILTER) >> VERSION_BIG_U_INDEX,
-		(data & VERSION_SMALL_U_FILTER) >> VERSION_SMALL_U_INDEX);
+		(vitf & VERSION_BIG_M_FILTER) >> VERSION_BIG_M_INDEX,
+		(vitf & VERSION_SMALL_M_FILTER) >> VERSION_SMALL_M_INDEX,
+		(vitf & VERSION_BIG_U_FILTER) >> VERSION_BIG_U_INDEX,
+		(vitf & VERSION_SMALL_U_FILTER) >> VERSION_SMALL_U_INDEX);
 
 	return err;
 }
@@ -3493,14 +3497,14 @@ enum tfa98xx_error tfa_get_fw_lib_version(struct tfa_device *tfa,
 	for (i = 0; i < VERSION_STRING_LENGTH; i++) {
 		char token = buf[i * 3 + 2];
 
-		if (version_word[j] == token) {
-			j++;
+		if (j < strlen(version_word)) {
+			if (version_word[j] == token)
+				j++;
 			continue;
 		}
-		if ((j < strlen(version_word) - 1)
-			|| !((token >= '0' && token <= '9')
-			|| token == '.'
-			|| (token == 0 && num > 0)))
+		if (!(token >= '0' && token <= '9')
+			&& token != '.'
+			&& !(token == 0 && num > 0))
 			continue;
 
 		if (token == '.' || token == 0) {
@@ -3653,12 +3657,16 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 	}
 #endif
 
-	if (tfa->verbose) {
+#if !defined(TRACE_STATUS_AT_CALIBRATION)
+	if (tfa->verbose)
+#endif
+	{
 		/* check the configuration for cal profile */
 		snprintf(reg_state, 50, "DCA %d", TFA_GET_BF(tfa, DCA));
 #if defined(USE_TFA9878)
 		snprintf(reg_state + strlen(reg_state),
-			50, ", IPM %d", TFA7x_GET_BF(tfa, IPM));
+			50 - strlen(reg_state), ", IPM %d",
+			TFA7x_GET_BF(tfa, IPM));
 #endif /* USE_TFA9878 */
 		switch (tfa->rev & 0xff) {
 		case 0x78:
@@ -3666,9 +3674,11 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 		case 0x72:
 		case 0x94:
 			snprintf(reg_state + strlen(reg_state),
-				50, ", LPM1MODE %d", TFA7x_GET_BF(tfa, LPM1MODE));
+				50 - strlen(reg_state), ", LPM1MODE %d",
+				TFA7x_GET_BF(tfa, LPM1MODE));
 			snprintf(reg_state + strlen(reg_state),
-				50, ", LNMODE %d", TFA7x_GET_BF(tfa, LNMODE));
+				50 - strlen(reg_state), ", LNMODE %d",
+				TFA7x_GET_BF(tfa, LNMODE));
 			break;
 		default:
 			/* neither TFA987x */
@@ -3787,7 +3797,7 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 	if (need_cal == 0)
 		goto set_calibration_values_exit;
 
-#if !defined(MPLATFORM)
+#if !defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	err = tfa_wait_cal(tfa);
 #else
 	pr_info("%s: [%d] queue post-process to calibration\n",
@@ -4623,6 +4633,25 @@ enum tfa98xx_error tfa_wait_cal(struct tfa_device *tfa)
 	if (cal_err != TFA98XX_ERROR_OK || calibration_done == 0) {
 		pr_err("%s: calibration is not done; stop processing\n",
 			__func__);
+
+#if defined(TRACE_STATUS_AT_CALIBRATION)
+		for (i = 0; i < devcount; i++) {
+			ntfa = tfa98xx_get_tfa_device_from_index(i);
+
+			if (ntfa == NULL)
+				continue;
+			if ((ntfa->active_handle != -1)
+				&& (ntfa->active_handle != i))
+				continue;
+
+#if defined(USE_TFA9874) || defined(USE_TFA9878) || defined(USE_TFA9894)
+			tfa7x_status(ntfa);
+#else
+			tfa_status(ntfa);
+#endif
+		}
+#endif /* TRACE_STATUS_AT_CALIBRATION */
+
 #if !defined(WRITE_CALIBRATION_DATA_PARTLY)
 		return cal_err;
 #endif
@@ -4637,7 +4666,7 @@ enum tfa98xx_error tfa_wait_cal(struct tfa_device *tfa)
 			&& (ntfa->active_handle != i))
 			continue;
 
-#if !defined(MPLATFORM)
+#if !defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 		/* force MUTE after calibration, to set UNMUTE at sync later */
 		pr_debug("%s: [%d] force MUTE after calibration\n",
 			__func__, ntfa->dev_idx);
@@ -5243,6 +5272,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 			next_profile = cal_profile;
 		}
 #endif /* SET_DUMMY_CALIBRATION_VALUE */
+		tfa->first_after_boot = 1;
 	}
 
 	/* TfaRun_SpeakerBoost implies un-mute */
@@ -5476,7 +5506,7 @@ enum tfa_error tfa_dev_stop(struct tfa_device *tfa)
 	/* mute */
 	tfa_run_mute(tfa);
 
-#if defined(MPLATFORM)
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	/* cancel other pending wait_cal works */
 	cancel_delayed_work(&tfa->wait_cal_work);
 #endif
@@ -7119,7 +7149,7 @@ enum tfa98xx_error tfa7x_status(struct tfa_device *tfa)
 #if defined(USE_TFA9878)
 	state = TFA7x_GET_BF(tfa, LP0);
 	snprintf(reg_state + strlen(reg_state),
-		50, ", LP0 %d", state);
+		50 - strlen(reg_state), ", LP0 %d", state);
 	control = TFA7x_GET_BF(tfa, IPM);
 	if ((control == 0x0 || control == 0x3)
 		&& (state == 0x1))
@@ -7133,14 +7163,14 @@ enum tfa98xx_error tfa7x_status(struct tfa_device *tfa)
 	case 0x94:
 		state = TFA7x_GET_BF(tfa, LP1);
 		snprintf(reg_state + strlen(reg_state),
-			50, ", LP1 %d", state);
+			50 - strlen(reg_state), ", LP1 %d", state);
 		control = TFA7x_GET_BF(tfa, LPM1MODE);
 		if ((control == 0x0 || control == 0x3)
 			&& (state == 0x1))
 			low_power = 1;
 		state = TFA7x_GET_BF(tfa, LA);
 		snprintf(reg_state + strlen(reg_state),
-			50, ", LA %d", state);
+			50 - strlen(reg_state), ", LA %d", state);
 		control = TFA7x_GET_BF(tfa, LNMODE);
 		if ((control == 0x0)
 			&& (state == 0x1))
@@ -7476,6 +7506,8 @@ tfa_calibration_range_check(struct tfa_device *tfa,
 		__func__, tfa->rev, channel,
 		lower_limit_cal, upper_limit_cal, mohm);
 	if (mohm < lower_limit_cal || mohm > upper_limit_cal)
+		err = TFA98XX_ERROR_BAD_PARAMETER;
+	if (mohm == 0)
 		err = TFA98XX_ERROR_BAD_PARAMETER;
 
 	return err;
