@@ -1029,18 +1029,22 @@ enum tfa98xx_error tfa_wait_cal(struct tfa_device *tfa);
 
 /*
  * check speaker damage with event / status
+ * @param tfa the device struct pointer
  * @param dsp_event event from algorithm
  * @param dsp_status status from algorithm
  */
-int tfa_run_damage_check(int dsp_event, int dsp_status);
+int tfa_run_damage_check(struct tfa_device *tfa,
+	int dsp_event, int dsp_status);
 
 #if defined(TFA_USE_TFAVVAL_NODE)
 /*
  * check V validation result with event / status
+ * @param tfa the device struct pointer
  * @param dsp_event event from algorithm
  * @param dsp_status status from algorithm
  */
-int tfa_run_vval_result_check(int dsp_event, int dsp_status);
+int tfa_run_vval_result_check(struct tfa_device *tfa,
+	int dsp_event, int dsp_status);
 #endif /* TFA_USE_TFAVVAL_NODE */
 
 /*
@@ -1153,8 +1157,14 @@ int tfa_is_cold(struct tfa_device *tfa);
 
 int tfa_is_cold_amp(struct tfa_device *tfa);
 
-int tfa_nr_config_done(struct tfa_device *tfa);
-int tfa_nr_device_set(struct tfa_device *tfa);
+enum tfa_status_type {
+	TFA_SET_DEVICE = 0,
+	TFA_SET_CONFIG = 1,
+	TFA_SET_UNKNOWN
+};
+
+int tfa_count_status_flag(struct tfa_device *tfa, int type);
+void tfa_set_status_flag(struct tfa_device *tfa, int type, int value);
 
 #if defined(TFA_CHANGE_PCM_FORMAT)
 int tfa_is_pcm_format_changed(struct tfa_device *tfa);

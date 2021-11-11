@@ -10,8 +10,11 @@
 #define __TFA_INTERNAL_H__
 
 #include "tfa_dsp_fw.h"
-/* #include <sound/tfa_ext.h> */
+#if defined(TFA_SET_EXT_INTERNALLY)
 #include "tfa_ext.h"
+#else
+#include <sound/tfa_ext.h>
+#endif
 
 #ifdef QPLATFORM
 #if defined(TFA_SET_EXT_INTERNALLY) || defined(TFA_SET_IPC_PORT_ID)

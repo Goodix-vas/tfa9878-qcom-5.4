@@ -603,7 +603,7 @@ static int tfa98xx_dbgfs_mtpex_set(void *data, u64 val)
 	if (ret)
 		pr_err("error in reading reference temp\n");
 
-	ndev = tfa98xx->tfa->cnt->ndev;
+	ndev = tfa98xx->tfa->dev_count;
 	for (idx = 0; idx < ndev; idx++) {
 		ntfa = tfa98xx_get_tfa_device_from_channel(idx);
 		if (ntfa == NULL)
@@ -1667,6 +1667,11 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		/* EXT_TEMP */
 		tfa98xx_set_exttemp(tfa, temp_val);
 #endif /* TFA_USE_TFAVVAL_NODE */
+
+#if defined(TFA_MIXER_ON_DEVICE)
+		/* force to enable all the devices */
+		tfa->set_active = 1;
+#endif
 	}
 
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
@@ -1748,7 +1753,11 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 #endif
 	}
 
+#if !defined(TFA_WAIT_CAL_IN_WORKQUEUE)
 	pr_info("%s: calibration done!\n", __func__);
+#else
+	pr_info("%s: calibration started!\n", __func__);
+#endif
 	pr_info("%s: end\n", __func__);
 
 	return 0;
@@ -3822,6 +3831,7 @@ static void tfa98xx_container_loaded
 			= (dsp_send_message_t)tfa_dsp_msg;
 		tfa98xx->tfa->dev_ops.dsp_msg_read
 			= (dsp_read_message_t)tfa_dsp_msg_read;
+		tfa_set_ipc_loaded(1);
 	}
 
 	/* Enable debug traces */
@@ -3902,7 +3912,7 @@ static void tfa98xx_container_loaded
 	if (tfa98xx->tfa->dev_idx == 0)
 		tfa98xx_main = tfa98xx;
 	if (tfa98xx->tfa->dev_idx
-		== tfa98xx->tfa->cnt->ndev - 1) {
+		== tfa98xx->tfa->dev_count - 1) {
 		if (tfa98xx_main != NULL)
 			tfa98xx_create_controls(tfa98xx_main);
 	}
@@ -4290,12 +4300,12 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 			if (failed) {
 				tfa_handle_damaged_speakers(ntfa);
 				continue;
-			} else {
-				pr_info("%s: UNMUTE dev %d\n",
-					__func__, ntfa->dev_idx);
-				tfa_dev_set_state(ntfa,
-					TFA_STATE_UNMUTE, 0);
 			}
+
+			pr_info("%s: UNMUTE dev %d\n",
+				__func__, ntfa->dev_idx);
+			tfa_dev_set_state(ntfa,
+				TFA_STATE_UNMUTE, 0);
 
 			mutex_lock(&tfa98xx->dsp_lock);
 			/*
@@ -4691,15 +4701,17 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 			tfa98xx->pstream, tfa98xx->cstream, tfa98xx->samstream);
 
 #if defined(TFA_BLACKBOX_LOGGING)
-		if (tfa98xx->tfa->dev_idx == 0) /* main device only */
+		if (tfa98xx_count_active_stream(BIT_PSTREAM)
+			== tfa98xx_device_count) /* at first device */
 			if (tfa98xx->tfa->blackbox_enable
-				&& (tfa98xx_count_active_stream(BIT_PSTREAM) > 0)) {
+				&& !tfa98xx->tfa->unset_log) {
 				/* get logging once
 				 * before shutting down pstream
 				 */
 				pr_info("%s: get blackbox logging\n", __func__);
 				tfa_update_log();
 			}
+		tfa98xx->tfa->unset_log = 0;
 #endif /* TFA_BLACKBOX_LOGGING */
 
 		tfa98xx_set_stream_state(tfa98xx->tfa,
@@ -5035,7 +5047,7 @@ static int tfa98xx_parse_dt(struct device *dev,
 	return 0;
 }
 
-#if defined(LIMIT_CAL_FROM_DTS)
+#if defined(TFA_LIMIT_CAL_FROM_DTS)
 static int tfa98xx_parse_limit_cal_dt(struct device *dev,
 	struct tfa98xx *tfa98xx, struct device_node *np)
 {
@@ -5062,7 +5074,7 @@ static int tfa98xx_parse_limit_cal_dt(struct device *dev,
 
 	return ((err_lower == 0 && err_upper == 0) ? 0 : -1);
 }
-#endif /* LIMIT_CAL_FROM_DTS */
+#endif /* TFA_LIMIT_CAL_FROM_DTS */
 
 static ssize_t tfa98xx_reg_write(struct file *filp, struct kobject *kobj,
 	struct bin_attribute *bin_attr,
@@ -5306,7 +5318,7 @@ static ssize_t tfa98xx_mtpex_store(struct device *dev,
 	if (ret)
 		pr_err("error in reading reference temp\n");
 
-	ndev = tfa98xx->tfa->cnt->ndev;
+	ndev = tfa98xx->tfa->dev_count;
 	for (idx = 0; idx < ndev; idx++) {
 		ntfa = tfa98xx_get_tfa_device_from_channel(idx);
 		if (ntfa == NULL)
@@ -5393,7 +5405,7 @@ static ssize_t tfa98xx_blackbox_show(struct device *dev,
 	}
 
 #if defined(TFA_BLACKBOX_LOGGING)
-	ndev = tfa98xx->tfa->cnt->ndev;
+	ndev = tfa98xx->tfa->dev_count;
 	if (ndev < 1)
 		return -EINVAL;
 
@@ -5612,6 +5624,7 @@ enum tfa98xx_error tfa_run_cal(int index, uint16_t *value)
 
 	tfa98xx = (struct tfa98xx *)tfa->data;
 
+	/* check if calibration already runs */
 	tfa_wait_until_calibration_done(tfa);
 
 	ret = tfa98xx_run_calibration(tfa98xx);
@@ -5755,7 +5768,7 @@ int tfa98xx_get_blackbox_data(int dev, int *data)
 	if (tfa->tfa_family == 0)
 		return TFA98XX_ERROR_NOT_OPEN;
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	if (ndev < 1)
 		return TFA98XX_ERROR_NOT_OPEN;
 	if (dev < 0 || dev >= ndev)
@@ -5813,7 +5826,7 @@ int tfa98xx_get_blackbox_data_index(int dev, int index, int reset)
 	if (index < 0 || index >= ID_BLACKBOX_MAX)
 		return -EINVAL;
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	if (ndev < 1)
 		return -EINVAL;
 	if (dev < 0 || dev >= ndev)
@@ -5868,7 +5881,7 @@ enum tfa98xx_error tfa_run_vval(int index, uint16_t *value)
 
 	pr_info("%s: begin\n", __func__);
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	for (idx = 0; idx < ndev; idx++) {
 		ntfa = tfa98xx_get_tfa_device_from_index(idx);
 		if (ntfa == NULL)
@@ -5879,6 +5892,7 @@ enum tfa98xx_error tfa_run_vval(int index, uint16_t *value)
 		ntfa->vval_result = VVAL_UNTESTED;
 	}
 
+	/* check if calibration already runs */
 	test_done = tfa_wait_until_calibration_done(tfa);
 
 	if (!test_done) {
@@ -6001,7 +6015,7 @@ int tfa98xx_update_spkt_data(int idx)
 	if (tfa->tfa_family == 0)
 		return DEFAULT_REF_TEMP;
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	if ((ndev < 1)
 		|| (idx < 0 || idx >= ndev))
 		return DEFAULT_REF_TEMP;
@@ -6063,7 +6077,7 @@ int tfa98xx_write_sknt_control(int idx, int value)
 	if (tfa->tfa_family == 0)
 		return -ENODEV;
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	if ((ndev < 1)
 		|| (idx < 0 || idx >= ndev))
 		return -EINVAL;
@@ -6304,7 +6318,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	tfa98xx->tfa->data = (void *)tfa98xx;
 	tfa98xx->tfa->cachep = tfa98xx_cache;
 
-#if defined(LIMIT_CAL_FROM_DTS)
+#if defined(TFA_LIMIT_CAL_FROM_DTS)
 	if (np) {
 		ret = tfa98xx_parse_limit_cal_dt(&i2c->dev, tfa98xx, np);
 		if (ret) {
@@ -6313,7 +6327,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 			/* set default range instead */
 		}
 	}
-#endif /* LIMIT_CAL_FROM_DTS */
+#endif /* TFA_LIMIT_CAL_FROM_DTS */
 
 	/* Modify the stream names, by appending the i2c device address.
 	 * This is used with multicodec, in order to discriminate devices.

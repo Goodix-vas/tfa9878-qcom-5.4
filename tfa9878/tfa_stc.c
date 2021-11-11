@@ -111,15 +111,14 @@ static int sknt_data[MAX_HANDLES];
 static ssize_t update_sknt_control(int idx, char *buf)
 {
 	struct tfa_device *tfa = NULL;
-	int size, ndev;
+	int size;
 	char sknt_result[FILESIZE_STC] = {0};
 
 	tfa = tfa98xx_get_tfa_device_from_index(0);
 	if (tfa == NULL)
 		return -EINVAL; /* unused device */
 
-	ndev = tfa->cnt->ndev;
-	if (ndev < 1 || ndev <= idx)
+	if (idx < 0 || idx >= tfa->dev_count)
 		return -EINVAL;
 
 	snprintf(sknt_result, FILESIZE_STC,

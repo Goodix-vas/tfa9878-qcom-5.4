@@ -825,8 +825,10 @@ enum tfa98xx_error tfa_cont_write_file(struct tfa_device *tfa,
 		/* skip if loaded at the first device:
 		 * to write files only once
 		 */
-		if (tfa_nr_device_set(tfa) > 1
-			|| tfa_nr_config_done(tfa) > 0) {
+		if (tfa_count_status_flag(tfa,
+			TFA_SET_DEVICE) > 1
+			|| tfa_count_status_flag(tfa,
+			TFA_SET_CONFIG) > 0) {
 			pr_debug("%s: skip secondary device (%d)\n",
 				__func__, tfa->dev_idx);
 			return err;
@@ -1524,8 +1526,10 @@ enum tfa98xx_error tfa_cont_write_files(struct tfa_device *tfa)
 				/* skip if loaded at the first device:
 				 * to write cmd only once
 				 */
-				if (tfa_nr_device_set(tfa) > 1
-					|| tfa_nr_config_done(tfa) > 0)
+				if (tfa_count_status_flag(tfa,
+					TFA_SET_DEVICE) > 1
+					|| tfa_count_status_flag(tfa,
+					TFA_SET_CONFIG) > 0)
 					continue;
 			}
 
@@ -1550,8 +1554,10 @@ enum tfa98xx_error tfa_cont_write_files(struct tfa_device *tfa)
 				/* skip if loaded at the first device:
 				 * to write cmd only once
 				 */
-				if (tfa_nr_device_set(tfa) > 1
-					|| tfa_nr_config_done(tfa) > 0)
+				if (tfa_count_status_flag(tfa,
+					TFA_SET_DEVICE) > 1
+					|| tfa_count_status_flag(tfa,
+					TFA_SET_CONFIG) > 0)
 					continue;
 			}
 
@@ -1649,8 +1655,10 @@ enum tfa98xx_error tfa_cont_write_files_prof(struct tfa_device *tfa,
 				/* skip if loaded at the first device:
 				 * to write cmd only once
 				 */
-				if (tfa_nr_device_set(tfa) > 1
-					|| tfa_nr_config_done(tfa) > 0)
+				if (tfa_count_status_flag(tfa,
+					TFA_SET_DEVICE) > 1
+					|| tfa_count_status_flag(tfa,
+					TFA_SET_CONFIG) > 0)
 					break;
 			}
 
@@ -1677,8 +1685,10 @@ enum tfa98xx_error tfa_cont_write_files_prof(struct tfa_device *tfa,
 				/* skip if loaded at the first device:
 				 * to write cmd only once
 				 */
-				if (tfa_nr_device_set(tfa) > 1
-					|| tfa_nr_config_done(tfa) > 0)
+				if (tfa_count_status_flag(tfa,
+					TFA_SET_DEVICE) > 1
+					|| tfa_count_status_flag(tfa,
+					TFA_SET_CONFIG) > 0)
 					break;
 			}
 
@@ -2394,8 +2404,10 @@ enum tfa98xx_error tfa_cont_write_profile(struct tfa_device *tfa,
 				/* skip if loaded at the first device:
 				 * to write cmd only once
 				 */
-				if (tfa_nr_device_set(tfa) > 1
-					|| tfa_nr_config_done(tfa) > 0)
+				if (tfa_count_status_flag(tfa,
+					TFA_SET_DEVICE) > 1
+					|| tfa_count_status_flag(tfa,
+					TFA_SET_CONFIG) > 0)
 					break;
 			}
 
@@ -2427,8 +2439,10 @@ enum tfa98xx_error tfa_cont_write_profile(struct tfa_device *tfa,
 				/* skip if loaded at the first device:
 				 * to write cmd only once
 				 */
-				if (tfa_nr_device_set(tfa) > 1
-					|| tfa_nr_config_done(tfa) > 0)
+				if (tfa_count_status_flag(tfa,
+					TFA_SET_DEVICE) > 1
+					|| tfa_count_status_flag(tfa,
+					TFA_SET_CONFIG) > 0)
 					break;
 			}
 

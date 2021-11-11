@@ -187,6 +187,8 @@ struct tfa_device {
 	struct kmem_cache *cachep;
 	char fw_itf_ver[4];
 
+	int dev_count;
+	int dev_tfadsp;
 #if defined(TFA_MIXER_ON_DEVICE)
 	int set_active;
 #endif
@@ -213,6 +215,8 @@ struct tfa_device {
 	int active_count;
 	int ampgain;
 	int individual_msg;
+	int set_device;
+	int set_config;
 #if defined(TFADSP_DSP_BUFFER_POOL)
 	struct tfa98xx_buffer_pool buf_pool[POOL_MAX_INDEX];
 #endif
@@ -223,13 +227,14 @@ struct tfa_device {
 	struct workqueue_struct *tfacal_wq;
 	struct delayed_work wait_cal_work;
 #endif
-#if defined(LIMIT_CAL_FROM_DTS)
+#if defined(TFA_LIMIT_CAL_FROM_DTS)
 	int lower_limit_cal;
 	int upper_limit_cal;
 #endif
 	char fw_lib_ver[3];
 #if defined(TFA_BLACKBOX_LOGGING)
 	int blackbox_enable;
+	int unset_log;
 	int log_data[LOG_BUFFER_SIZE];
 #endif
 	int irq_all;

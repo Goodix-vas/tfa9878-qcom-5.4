@@ -86,7 +86,7 @@ static ssize_t update_vval_status(int idx, char *buf)
 	if (tfa == NULL)
 		return -EINVAL; /* unused device */
 
-	if (tfa->cnt->ndev <= idx)
+	if (idx < 0 || idx >= tfa->dev_count)
 		return -EINVAL;
 
 	if (vval_data[idx] != VVAL_PASS
@@ -239,7 +239,7 @@ static ssize_t validation_store(struct device *dev,
 	if (tfa == NULL)
 		return -EINVAL; /* unused device */
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	if (ndev < 1)
 		return -EINVAL;
 

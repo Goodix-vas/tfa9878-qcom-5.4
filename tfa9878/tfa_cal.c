@@ -87,7 +87,7 @@ static ssize_t update_rdc_status(int idx, char *buf)
 	if (tfa == NULL)
 		return -EINVAL; /* unused device */
 
-	if (tfa->cnt->ndev <= idx)
+	if (idx < 0 || idx >= tfa->dev_count)
 		return -EINVAL;
 
 	if (cal_data[idx].rdc == 0
@@ -135,7 +135,7 @@ static ssize_t update_temp_status(int idx, char *buf)
 	if (tfa == NULL)
 		return -EINVAL; /* unused device */
 
-	if (tfa->cnt->ndev <= idx)
+	if (idx < 0 || idx >= tfa->dev_count)
 		return -EINVAL;
 
 	if (cal_data[idx].temp == 0
@@ -338,7 +338,7 @@ static ssize_t status_store(struct device *dev,
 	if (tfa == NULL)
 		return -EINVAL; /* unused device */
 
-	ndev = tfa->cnt->ndev;
+	ndev = tfa->dev_count;
 	if (ndev < 1)
 		return -EINVAL;
 
