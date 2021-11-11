@@ -1183,6 +1183,11 @@ enum tfa98xx_error tfa7x_status(struct tfa_device *tfa);
  */
 int tfa_dev_get_mtpb(struct tfa_device *tfa);
 
+#if defined(TFA_USE_TFASTC_NODE)
+enum tfa98xx_error tfa_read_tspkr(struct tfa_device *tfa, int *spkt);
+enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

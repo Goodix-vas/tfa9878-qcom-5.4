@@ -37,6 +37,10 @@ static int __init tfa98xx_sysfs_init(void)
 	ret = tfa98xx_vval_init(g_tfa_class);
 #endif /* TFA_USE_TFAVVAL_NODE */
 
+#if defined(TFA_USE_TFASTC_NODE)
+	ret = tfa98xx_stc_init(g_tfa_class);
+#endif /* TFA_USE_TFASTC_NODE */
+
 	return ret;
 }
 module_init(tfa98xx_sysfs_init);
@@ -54,6 +58,10 @@ static void __exit tfa98xx_sysfs_exit(void)
 #if defined(TFA_USE_TFAVVAL_NODE)
 	tfa98xx_vval_exit(g_tfa_class);
 #endif /* TFA_USE_TFAVVAL_NODE */
+
+#if defined(TFA_USE_TFASTC_NODE)
+	tfa98xx_stc_exit(g_tfa_class);
+#endif /* TFA_USE_TFASTC_NODE */
 
 	class_destroy(g_tfa_class);
 	pr_info("exited\n");

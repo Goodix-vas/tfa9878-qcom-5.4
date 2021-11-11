@@ -57,6 +57,8 @@
 #define MIN_CALIBRATION_DATA 0
 #define MAX_CALIBRATION_DATA 32000
 
+#define DEFAULT_REF_TEMP 25
+
 enum instream_state {
 	BIT_PSTREAM = 1, /* b0 */
 	BIT_CSTREAM = 2, /* b1 */
@@ -151,6 +153,22 @@ enum tfa_vval_result {
 enum tfa98xx_error tfa_run_vval(int index, uint16_t *value);
 enum tfa98xx_error tfa_get_vval_data(int index, uint16_t *value);
 #endif
+
+#if defined(TFA_USE_TFASTC_NODE)
+#if defined(TFA_USE_STC_VOLUME_TABLE)
+#define STC_TABLE_MAX	(10)
+int tfa_get_sknt_data_from_table(int idx, int value);
+
+#if defined(TFA_ENABLE_STC_TUNING)
+int tfa_get_stc_minmax(int idx, int minmax);
+void tfa_set_stc_minmax(int idx, int minmax, int value);
+void tfa_get_stc_gtable(int idx, int *value);
+void tfa_set_stc_gtable(int idx, int *value);
+#endif /* TFA_ENABLE_STC_TUNING */
+#endif /* TFA_USE_STC_VOLUME_TABLE */
+#endif /* TFA_USE_TFASTC_NODE */
+
+int tfa_wait_until_calibration_done(struct tfa_device *tfa);
 
 #endif /* __TFA_INTERNAL_H__ */
 

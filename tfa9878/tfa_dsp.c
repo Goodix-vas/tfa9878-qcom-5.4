@@ -3787,6 +3787,13 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 	config_count = 0;
 	dsp_cal_value[0] = dsp_cal_value[1] = -1;
 
+#if defined(TFA_USE_TFASTC_NODE)
+#if defined(TFA_USE_STC_VOLUME_TABLE)
+	/* initialize volume control */
+	err = tfa_write_volume(tfa, NULL);
+#endif /* TFA_USE_STC_VOLUME_TABLE */
+#endif /* TFA_USE_TFASTC_NODE */
+
 	err = tfa_dsp_cmd_id_write
 		(tfa, MODULE_SPEAKERBOOST, SB_PARAM_SET_RE25C,
 		sizeof(bytes), bytes);
@@ -5121,6 +5128,7 @@ void tfa_set_active_handle(struct tfa_device *tfa, int profile)
 
 		ntfa->active_handle = active_handle;
 		ntfa->active_count = count;
+		ntfa->is_bypass = 0; /* reset at start */
 	}
 }
 
@@ -5534,6 +5542,7 @@ enum tfa_error tfa_dev_stop(struct tfa_device *tfa)
 				__func__);
 			err = tfa_tib_dsp_msgmulti(tfa, -2, NULL);
 		}
+		tfa->is_bypass = 0; /* reset at stop */
 	}
 
 #if defined(TFA_MUTE_CONTROL)
@@ -7514,6 +7523,25 @@ tfa_calibration_range_check(struct tfa_device *tfa,
 }
 #endif /* CHECK_CALIBRATION_DATA_RANGE */
 
+int tfa_wait_until_calibration_done(struct tfa_device *tfa)
+{
+	int tries = 0;
+
+	if (!tfa->is_calibrating)
+		return 0; /* not running now */
+
+	pr_info("%s: calibration / V validation now runs\n",
+		__func__);
+	while (tries < TFA98XX_API_WAITCAL_NTRIES) {
+		msleep_interruptible(CAL_STATUS_INTERVAL);
+		if (tfa->is_calibrating == 0)
+			return 1; /* done */
+		tries++;
+	}
+
+	return 0; /* timeout */
+}
+
 #if defined(TFA_BLACKBOX_LOGGING)
 enum tfa98xx_error tfa_configure_log(int enable)
 {
@@ -7663,4 +7691,314 @@ enum tfa98xx_error tfa_update_log(void)
 	return err;
 }
 #endif /* TFA_BLACKBOX_LOGGING */
+
+#if defined(TFA_USE_TFASTC_NODE)
+#if defined(TFA_USE_STC_MEMTRACK)
+#define TSPKR_ADDR	0x06
+#define TEMP_INDEX	1
+#else
+#define TEMP_INDEX	0
+#endif /* TFA_USE_STC_MEMTRACK */
+enum tfa98xx_error tfa_read_tspkr(struct tfa_device *tfa, int *spkt)
+{
+	enum tfa98xx_error error = TFA98XX_ERROR_OK;
+#if defined(TFA_USE_STC_MEMTRACK)
+	unsigned char buffer[(1 + 2) * 3] = {0};
+	int offset = 0, addr = 0;
+#endif /* TFA_USE_STC_MEMTRACK */
+#if defined(TFA_CUSTOM_FORMAT_AT_RESPONSE)
+	unsigned char bytes[(TEMP_INDEX + 1 + 2) * 3] = {0};
+#else
+	unsigned char bytes[(TEMP_INDEX + 2) * 3] = {0};
+#endif /* TFA_CUSTOM_FORMAT_AT_RESPONSE */
+	int data[TEMP_INDEX + 2];
+	int nr_bytes, i, spkr_count = 0;
+
+	error = tfa_supported_speakers(tfa, &spkr_count);
+	if (error != TFA98XX_ERROR_OK) {
+		pr_err("error in checking supported speakers\n");
+		return error;
+	}
+
+	/* SoftDSP interface differs from hw-dsp interfaces */
+	if (tfa->is_probus_device && devcount > 1)
+		spkr_count = devcount;
+
+#if defined(TFA_USE_STC_MEMTRACK)
+	pr_info("%s: write SET_MEMTRACK of TSpkr\n", __func__);
+
+	offset = 0;
+	buffer[offset++] = (uint8_t)((spkr_count >> 16) & 0xffff);
+	buffer[offset++] = (uint8_t)((spkr_count >> 8) & 0xff);
+	buffer[offset++] = (uint8_t)(spkr_count & 0xff);
+
+	for(i = 0; i < spkr_count; i++) {
+		addr = TSPKR_ADDR + i; /* TSpkr address */
+
+		/* indexed address + snapshot */
+		buffer[offset + i * 3] = (uint8_t)0x23;
+		buffer[offset + i * 3 + 1] = (uint8_t)((addr >> 8) & 0xff);
+		buffer[offset + i * 3 + 2] = (uint8_t)(addr & 0xff);
+	}
+
+	nr_bytes = (1 + spkr_count) * 3;
+	tfa->individual_msg = 1;
+	error = tfa_dsp_cmd_id_write(tfa, MODULE_FRAMEWORK,
+		FW_PAR_ID_SET_MEMTRACK, nr_bytes, buffer);
+	if (error != TFA98XX_ERROR_OK) {
+		pr_info("%s: failed to set memtrack for TSpkr (err %d)\n",
+			__func__, error);
+		return error;
+	}
+
+	msleep_interruptible(BUSLOAD_INTERVAL);
+#endif /* TFA_USE_STC_MEMTRACK */
+
+#if defined(TFA_CUSTOM_FORMAT_AT_RESPONSE)
+	nr_bytes = (TEMP_INDEX + 1 + spkr_count) * 3;
+#else
+	nr_bytes = (TEMP_INDEX + spkr_count) * 3;
+#endif /* TFA_CUSTOM_FORMAT_AT_RESPONSE */
+
+#if defined(TFA_USE_STC_MEMTRACK)
+	pr_info("%s: read GET_MEMTRACK of TSpkr\n", __func__);
+	error = tfa_dsp_cmd_id_write_read(tfa,
+		MODULE_FRAMEWORK,
+		FW_PAR_ID_GET_MEMTRACK, nr_bytes, bytes);
+#else
+	pr_info("%s: read SB_PARAM_GET_TSPKR\n", __func__);
+	error = tfa_dsp_cmd_id_write_read(tfa,
+		MODULE_SPEAKERBOOST,
+		SB_PARAM_GET_TSPKR, nr_bytes, bytes);
+#endif
+
+	if (error != TFA98XX_ERROR_OK) {
+		pr_info("%s: failure in reading speaker temperature (err %d)\n",
+			__func__, error);
+		return error;
+	}
+
+	tfa98xx_convert_bytes2data(nr_bytes, bytes, data);
+
+	pr_debug("%s: SPKR_TEMP - spkr_count %d\n",
+		__func__, spkr_count);
+	pr_debug("%s: SPKR_TEMP - data[0]=%d, data[1]=%d\n",
+		__func__, data[TEMP_INDEX], data[TEMP_INDEX + 1]);
+
+	/* real-time t (degC) */
+	for (i = 0; i < spkr_count; i++)
+		spkt[i] = (int)(data[TEMP_INDEX + i] / TFA2_FW_T_DATA_SCALE);
+
+	return error;
+}
+
+enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt)
+{
+	enum tfa98xx_error error = TFA98XX_ERROR_OK;
+	unsigned char bytes[2 * 3] = {0};
+	int i, spkr_count = 0;
+	int stcontrol[MAX_HANDLES] = {0};
+	int data = 0;
+
+	error = tfa_supported_speakers(tfa, &spkr_count);
+	if (error != TFA98XX_ERROR_OK) {
+		pr_err("error in checking supported speakers\n");
+		return error;
+	}
+
+	/* SoftDSP interface differs from hw-dsp interfaces */
+	if (tfa->is_probus_device && devcount > 1)
+		spkr_count = devcount;
+
+	if (sknt != NULL)
+		memcpy(stcontrol, sknt, spkr_count * sizeof(int));
+	else
+		pr_info("%s: initialize surface temperature control\n",
+			__func__);
+
+	/* We have to copy it for both channels. Even when MONO! */
+	if (devcount == 1) { /* mono */
+		stcontrol[1] = stcontrol[0];
+		spkr_count++;
+	} else if (devcount == 2) { /* stereo */
+		switch (tfa->active_handle) {
+		case 0:
+			pr_info("%s: copy stc from dev 0 to dev 1\n",
+				__func__);
+			stcontrol[1] = stcontrol[0];
+			break;
+		case 1:
+			pr_info("%s: copy stc from dev 1 to dev 0\n",
+				__func__);
+			stcontrol[0] = stcontrol[1];
+			break;
+		case -1:
+			/* individually configured */
+		default:
+			/* wrong handle */
+			break;
+		}
+	} else {
+		pr_err("%s: more than 2 devices were selected (devcount %d)\n",
+			__func__, devcount);
+		spkr_count = 2;
+	}
+
+	for (i = 0; i < spkr_count; i++) {
+#if defined(TFA_USE_STC_VOLUME_TABLE)
+		stcontrol[i] = (stcontrol[i] < 0xff) ? stcontrol[i]: 0xff;
+		pr_info("%s: dev %d - volume index (%d)\n",
+			__func__, i, stcontrol[i]);
+		data = stcontrol[i];
+#else
+		/* 10-bit signed integer */
+		if (stcontrol[i] >= TFA2_FW_T_DATA_MAX) {
+			pr_info("%s: dev %d - data overflow (%d), to set max (%d)\n",
+				__func__, i, stcontrol[i], TFA2_FW_T_DATA_MAX - 1);
+			stcontrol[i] = TFA2_FW_T_DATA_MAX - 1;
+		}
+		if (stcontrol[i] < -TFA2_FW_T_DATA_MAX) {
+			pr_info("%s: dev %d - data overflow (%d), to set min (%d)\n",
+				__func__, i, stcontrol[i], -TFA2_FW_T_DATA_MAX);
+			stcontrol[i] = -TFA2_FW_T_DATA_MAX;
+		}
+		pr_info("%s: dev %d - surface temperature (%d)\n",
+			__func__, i, stcontrol[i]);
+#if defined(TFA_USE_CUSTOM_SET_TSURF)
+		data = (int)stcontrol[i];
+#else
+		data = (int)stcontrol[i] * TFA2_FW_T_DATA_SCALE;
+#endif /* TFA_USE_CUSTOM_SET_TSURF */
+#endif /* TFA_USE_STC_VOLUME_TABLE */
+
+		bytes[i * 3] = (uint8_t)((data >> 16) & 0xffff);
+		bytes[i * 3 + 1] = (uint8_t)((data >> 8) & 0xff);
+		bytes[i * 3 + 2] = (uint8_t)(data & 0xff);
+	}
+
+#if defined(TFA_USE_STC_VOLUME_TABLE)
+	pr_info("%s: write SB_PARAM_SET_VOLUME\n", __func__);
+	error = tfa_dsp_cmd_id_write
+		(tfa, MODULE_SPEAKERBOOST, SB_PARAM_SET_VOLUME,
+		sizeof(bytes), bytes);
+#else
+#if defined(TFA_USE_CUSTOM_SET_TSURF)
+	pr_info("%s: write CUSTOM_PARAM_SET_TSURF\n", __func__);
+	error = tfa_dsp_cmd_id_write
+		(tfa, MODULE_CUSTOM, CUSTOM_PARAM_SET_TSURF,
+		sizeof(bytes), bytes);
+#else
+	pr_info("%s: write SB_PARAM_SET_TSURF\n", __func__);
+	error = tfa_dsp_cmd_id_write
+		(tfa, MODULE_SPEAKERBOOST, SB_PARAM_SET_TSURF,
+		sizeof(bytes), bytes);
+#endif /* TFA_USE_CUSTOM_SET_TSURF */
+#endif /* TFA_USE_STC_VOLUME_TABLE */
+	if (error != TFA98XX_ERROR_OK)
+		pr_info("%s: failure in writing surface temperature (err %d)\n",
+			__func__, error);
+
+	return error;
+}
+
+#if defined(TFA_USE_STC_VOLUME_TABLE)
+#define STC_TEMP_MIN	(35)
+#define STC_TEMP_MAX	(44)
+
+static int stc_min[MAX_HANDLES] = {-1, -1, -1, -1};
+static int stc_max[MAX_HANDLES] = {-1, -1, -1, -1};
+static int stc_vol_table[MAX_HANDLES][STC_TABLE_MAX] = {
+	{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, /* dev 0 */
+	{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, /* dev 1 */
+	{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, /* dev 2 */
+	{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, /* dev 3 */
+};
+
+int tfa_get_sknt_data_from_table(int idx, int value)
+{
+	int data = 0xffff, vol_index = 0;
+
+	if (idx < 0 || idx >= MAX_HANDLES)
+		return data;
+
+	if (stc_min[idx] == -1 || stc_max[idx] == -1) {
+		/* use default min / max */
+		if (stc_min[idx] == -1)
+			stc_min[idx] = STC_TEMP_MIN;
+		if (stc_max[idx] == -1)
+			stc_max[idx] = STC_TEMP_MAX;
+
+		pr_info("%s : tfa_stc - dev %d - stc_min: %d, stc_max: %d\n",
+			__func__, idx, stc_min[idx], stc_max[idx]);
+	}
+
+	if (value < stc_min[idx])
+		value = stc_min[idx];
+	if (value > stc_max[idx])
+		value = stc_max[idx];
+
+	vol_index = ((value - stc_min[idx]) * (STC_TABLE_MAX - 1))
+		/ (stc_max[idx] - stc_min[idx]);
+	/* actuial gain is defined with STC_GAIN_STEP */
+	data = (int)stc_vol_table[idx][vol_index];
+
+	pr_info("%s: tfa_stc - dev %d - select volume index (%d; %d)\n",
+		__func__, idx, vol_index, data);
+
+	return data;
+}
+
+#if defined(TFA_ENABLE_STC_TUNING)
+int tfa_get_stc_minmax(int idx, int minmax)
+{
+	if (idx < 0 || idx >= MAX_HANDLES)
+		return 0xffff; /* wrong index */
+
+	switch (minmax) {
+	case 0: /* min */
+		return stc_min[idx];
+	case 1: /* max */
+		return stc_max[idx];
+	default: /* wrong index */
+		return 0xffff;
+	}
+}
+EXPORT_SYMBOL(tfa_get_stc_minmax);
+
+void tfa_set_stc_minmax(int idx, int minmax, int value)
+{
+	if (idx < 0 || idx >= MAX_HANDLES)
+		return; /* wrong index */
+
+	switch (minmax) {
+	case 0: /* min */
+		stc_min[idx] = value;
+	case 1: /* max */
+		stc_max[idx] = value;
+	default: /* wrong index */
+		break;
+	}
+}
+EXPORT_SYMBOL(tfa_set_stc_minmax);
+
+void tfa_get_stc_gtable(int idx, int *value)
+{
+	if (idx < 0 || idx >= MAX_HANDLES)
+		return; /* wrong index */
+
+	memcpy(value, &stc_vol_table[idx][0], sizeof(int) * STC_TABLE_MAX);
+}
+EXPORT_SYMBOL(tfa_get_stc_gtable);
+
+void tfa_set_stc_gtable(int idx, int *value)
+{
+	if (idx < 0 || idx >= MAX_HANDLES)
+		return; /* wrong index */
+
+	memcpy(&stc_vol_table[idx][0], value, sizeof(int) * STC_TABLE_MAX);
+}
+EXPORT_SYMBOL(tfa_set_stc_gtable);
+#endif /* TFA_ENABLE_STC_TUNING */
+#endif /* TFA_USE_STC_VOLUME_TABLE */
+#endif /* TFA_USE_TFASTC_NODE */
 

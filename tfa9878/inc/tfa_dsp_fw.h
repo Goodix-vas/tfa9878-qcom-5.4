@@ -54,6 +54,7 @@ enum tfa_fw_event {/* not all available on each device */
 #define MODULE_BIQUADFILTERBANK	2
 #define MODULE_TAPTRIGGER		5
 #define MODULE_SETRE			9
+#define MODULE_CUSTOM			15
 
 /* RPC commands */
 /* SET */
@@ -101,6 +102,12 @@ enum tfa_fw_event {/* not all available on each device */
 #define SB_PARAM_SET_DATA_LOGGER        0x0D
 #define SB_PARAM_SET_POWER_SAVER        0x0E
 #define SB_PARAM_SET_DRC                0x0F /* old version */
+#if !defined(TFA_USE_STC_VOLUME_TABLE)
+#if !defined(TFA_USE_CUSTOM_SET_TSURF)
+#define SB_PARAM_SET_TSURF              0x7F /* to be defined */
+#endif
+#endif
+
 /* GET */
 #define SB_PARAM_GET_ALGO_PARAMS        0x80
 /* #define SB_PARAM_GET_LAGW               0x81 */ /* removed */
@@ -121,7 +128,14 @@ enum tfa_fw_event {/* not all available on each device */
 #define SB_PARAM_GET_SIBILANCE_B2_FILT  0x94
 #define SB_PARAM_GET_SIBILANCE_B3_FILT  0x95
 #define SB_PARAM_GET_SIBILANCE_GAIN_FILT 0x96
+#define SB_PARAM_GET_TSPKR              0xA8
 /* #define SB_PARAM_GET_TAG                0xFF */ /* removed */
+
+#if !defined(TFA_USE_STC_VOLUME_TABLE)
+#if defined(TFA_USE_CUSTOM_SET_TSURF)
+#define CUSTOM_PARAM_SET_TSURF          0x01 /* aligned with wrapper */
+#endif
+#endif
 
 /* old version */
 #define SB_PARAM_SET_EQ                 0x0A /* 2 EQ filters */
@@ -195,4 +209,5 @@ enum tfa_fw_event {/* not all available on each device */
 #define TFA2_FW_X_DATA_SCALE	262144 /* 2097152 */
 #define TFA2_FW_X_DATA_UM_SCALE	262 /* 2097 */
 #define TFA2_FW_T_DATA_SCALE	16384
+#define TFA2_FW_T_DATA_MAX	512 /* 10-bit signed integer */
 #endif /* TFA98XX_INTERNALS_H */

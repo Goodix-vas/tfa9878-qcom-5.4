@@ -580,7 +580,7 @@ static int tfa98xx_dbgfs_mtpex_set(void *data, u64 val)
 	enum tfa_error err;
 #if defined(TFA_READ_REFERENCE_TEMP)
 	enum tfa98xx_error ret;
-	u16 temp_val = 25;
+	u16 temp_val = DEFAULT_REF_TEMP;
 	int idx, ndev;
 	struct tfa_device *ntfa = NULL;
 #endif
@@ -1604,7 +1604,7 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 	int idx, ndev = tfa98xx_device_count;
 	int cal_profile = 0;
 	u64 otc_val = 1; /* calibration once by default */
-	u16 temp_val = 25; /* default ambient temperature */
+	u16 temp_val = DEFAULT_REF_TEMP; /* default */
 #if defined(TFA_USE_TFAVVAL_NODE)
 	int mtpex[MAX_HANDLES] = {0};
 	int re25;
@@ -1624,7 +1624,7 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 	if (ret) {
 		pr_err("%s: error in reading reference temp\n",
 			__func__);
-		temp_val = 25; /* default ambient temperature */
+		temp_val = DEFAULT_REF_TEMP; /* default */
 	}
 #endif
 
@@ -1805,8 +1805,9 @@ static enum tfa98xx_error tfa98xx_read_reference_temp(short *value)
 	pr_info("%s: read quiet value = (%d)\n", __func__, *value);
 #else
 	/* neither TFA_USE_POWER_SUPPLY or TFA_USE_THERMAL_SENSOR */
-	pr_info("%s: use default value = (25)\n", __func__);
-	*value = 25; /* Re25C, if not specified */
+	pr_info("%s: use default value = (%d)\n", __func__,
+		DEFAULT_REF_TEMP);
+	*value = DEFAULT_REF_TEMP; /* Re25C, if not specified */
 #endif
 
 	return TFA98XX_ERROR_OK;
@@ -5277,7 +5278,7 @@ static ssize_t tfa98xx_mtpex_store(struct device *dev,
 	static const char ref[] = "0"; /* "please calibrate now" */
 #if defined(TFA_READ_REFERENCE_TEMP)
 	enum tfa98xx_error ret;
-	u16 temp_val = 25;
+	u16 temp_val = DEFAULT_REF_TEMP;
 	int idx, ndev;
 	struct tfa_device *ntfa = NULL;
 #endif
@@ -5601,38 +5602,45 @@ enum tfa98xx_error tfa_run_cal(int index, uint16_t *value)
 	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
 	struct tfa98xx *tfa98xx;
 	int ret = 0;
-	int mtp = 0, mtpex = 0;
+	int mtpex = 0;
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
+	int tries = 0;
+#endif
 
 	if (!tfa)
 		return TFA98XX_ERROR_NOT_OPEN;
 
 	tfa98xx = (struct tfa98xx *)tfa->data;
 
-	if (tfa->is_calibrating) {
-		int tries = 0;
-
-		pr_info("%s: calibration already runs\n",
-			__func__);
-		while (tries < TFA98XX_API_WAITCAL_NTRIES) {
-			msleep_interruptible(CAL_STATUS_INTERVAL);
-			if (tfa->is_calibrating == 0)
-				break;
-		}
-	}
+	tfa_wait_until_calibration_done(tfa);
 
 	ret = tfa98xx_run_calibration(tfa98xx);
 	if (ret < 0)
 		return TFA98XX_ERROR_FAIL;
 
-	mtp = tfa_dev_mtp_get(tfa98xx->tfa, TFA_MTP_RE25);
-	mtpex = TFA_GET_BF(tfa98xx->tfa, MTPEX);
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
+	tfa_wait_until_calibration_done(tfa);
+#endif /* TFA_WAIT_CAL_IN_WORKQUEUE */
 
 	if (value == NULL)
 		return TFA98XX_ERROR_BAD_PARAMETER;
+
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
+	while (tries < TFA98XX_API_REWRTIE_MTP_NTRIES) {
+		msleep_interruptible(CAL_STATUS_INTERVAL);
+		mtpex = TFA_GET_BF(tfa, MTPEX);
+		if (mtpex != 0) {
+			msleep_interruptible(CAL_STATUS_INTERVAL);
+			break;
+		}
+		tries++;
+	}
+#endif /* TFA_WAIT_CAL_IN_WORKQUEUE */
+	mtpex = TFA_GET_BF(tfa, MTPEX);
 	if (mtpex != 1)
 		return TFA98XX_ERROR_FAIL;
 
-	*value = mtp;
+	*value = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
 	if ((int)*value < 0) {
 		pr_info("%s: calibration data is not valid\n",
 			__func__);
@@ -5871,22 +5879,7 @@ enum tfa98xx_error tfa_run_vval(int index, uint16_t *value)
 		ntfa->vval_result = VVAL_UNTESTED;
 	}
 
-	test_done = 0;
-	if (tfa->is_calibrating) {
-		int tries = 0;
-
-		pr_info("%s: calibration already runs\n",
-			__func__);
-		while (tries < TFA98XX_API_WAITCAL_NTRIES) {
-			msleep_interruptible(CAL_STATUS_INTERVAL);
-			if (tfa->is_calibrating == 0) {
-				pr_info("%s: V validation already done\n",
-					__func__);
-				test_done = 1;
-				break;
-			}
-		}
-	}
+	test_done = tfa_wait_until_calibration_done(tfa);
 
 	if (!test_done) {
 		ret = tfa98xx_run_calibration(tfa98xx);
@@ -5895,6 +5888,10 @@ enum tfa98xx_error tfa_run_vval(int index, uint16_t *value)
 				__func__);
 			return TFA98XX_ERROR_FAIL;
 		}
+
+#if defined(TFA_WAIT_CAL_IN_WORKQUEUE)
+		tfa_wait_until_calibration_done(tfa);
+#endif /* TFA_WAIT_CAL_IN_WORKQUEUE */
 	}
 
 	if (value == NULL)
@@ -5945,6 +5942,204 @@ enum tfa98xx_error tfa_get_vval_data(int index, uint16_t *value)
 }
 EXPORT_SYMBOL(tfa_get_vval_data);
 #endif /* TFA_USE_TFAVVAL_NODE */
+
+#if defined(TFA_USE_TFASTC_NODE)
+#define TFA_USE_DEFAULT_TEMP_IN_LPM
+#undef TFA_RESET_STC_VOLUME_IN_LPM
+
+static int tfa_get_power_state(int index)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
+	int pm = 0, state = 0, control = 0;
+
+	if (tfa == NULL)
+		return 0; /* unused device */
+
+#if defined(USE_TFA9878)
+	state = TFA7x_GET_BF(tfa, LP0);
+	control = TFA7x_GET_BF(tfa, IPM);
+	if ((control == 0x0 || control == 0x3)
+		&& (state == 0x1))
+		pm |= 0x2; /* idle power */
+#endif /* USE_TFA9878 */
+	switch (tfa->rev & 0xff) {
+	case 0x78:
+	case 0x74:
+	case 0x72:
+	case 0x94:
+		state = TFA7x_GET_BF(tfa, LP1);
+		control = TFA7x_GET_BF(tfa, LPM1MODE);
+		if ((control == 0x0 || control == 0x3)
+			&& (state == 0x1))
+			pm |= 0x1; /* low power */
+		break;
+	default:
+		/* neither TFA987x */
+		break;
+	}
+
+	state = TFA_GET_BF(tfa, PWDN);
+	if (state == 1)
+		pm |= 0x4; /* power down */
+
+	return pm;
+}
+
+int tfa98xx_update_spkt_data(int idx)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(0);
+	struct tfa98xx *tfa98xx;
+	int ret = 0;
+	int value[MAX_HANDLES] = {0};
+	int i, ndev, data = 0;
+#if defined(TFA_USE_DEFAULT_TEMP_IN_LPM)
+	int pm = 0;
+#endif
+
+	if (tfa == NULL)
+		return DEFAULT_REF_TEMP; /* unused device */
+	if (tfa->tfa_family == 0)
+		return DEFAULT_REF_TEMP;
+
+	ndev = tfa->cnt->ndev;
+	if ((ndev < 1)
+		|| (idx < 0 || idx >= ndev))
+		return DEFAULT_REF_TEMP;
+
+	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
+		pr_info("%s: skipped - tfadsp is not active!\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
+#if defined(TFA_USE_DEFAULT_TEMP_IN_LPM)
+	pm = tfa_get_power_state(idx);
+	pr_info("%s: tfa_stc - dev %d - power state 0x%x\n",
+		__func__, idx, pm);
+
+	if (pm > 0) /* reset temperature in low power state */
+		return DEFAULT_REF_TEMP;
+#endif /* TFA_USE_DEFAULT_TEMP_IN_LPM */
+
+	pr_info("%s: tfa_stc - read tspkr for stc\n",
+		__func__);
+
+	tfa98xx = (struct tfa98xx *)tfa->data;
+
+	mutex_lock(&tfa98xx->dsp_lock);
+	ret = tfa_read_tspkr(tfa, value);
+	mutex_unlock(&tfa98xx->dsp_lock);
+	if (ret) {
+		pr_info("%s: tfa_stc failed to read data from amplifier\n",
+			__func__);
+		value[idx] = DEFAULT_REF_TEMP;
+	}
+	if (value[idx] == 0xffff) {
+		pr_info("%s: tfa_stc read wrong data from amplifier\n",
+			__func__);
+	}
+	data = value[idx];
+
+	for (i = 0; i < ndev; i++)
+		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
+			(idx == i) ? "*" : "", value[i]);
+
+	return data;
+}
+EXPORT_SYMBOL(tfa98xx_update_spkt_data);
+
+int tfa98xx_write_sknt_control(int idx, int value)
+{
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(0);
+	struct tfa98xx *tfa98xx;
+	int ret = 0;
+	int pm = 0;
+	int i, ndev, ready = 0;
+	static int data[MAX_HANDLES];
+	static int update[MAX_HANDLES];
+
+	if (tfa == NULL)
+		return -ENODEV;
+	if (tfa->tfa_family == 0)
+		return -ENODEV;
+
+	ndev = tfa->cnt->ndev;
+	if ((ndev < 1)
+		|| (idx < 0 || idx >= ndev))
+		return -EINVAL;
+
+	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
+		pr_info("%s: skipped - tfadsp is not active!\n",
+			__func__);
+		return -ENODEV;
+	}
+
+#if defined(TFA_RESET_STC_VOLUME_IN_LPM)
+	pm = tfa_get_power_state(idx);
+	pr_info("%s: tfa_stc - dev %d - power state 0x%x\n",
+		__func__, idx, pm);
+
+	if (pm > 0) /* reset gain in low power state */
+		value = DEFAULT_REF_TEMP;
+#endif /* TFA_RESET_STC_VOLUME_IN_LPM */
+
+	pr_info("%s: tfa_stc - dev %d - set surface temperature (%d)\n",
+		__func__, idx, value);
+	if (update[idx])
+		pr_debug("%s: tfa_stc - dev %d - overwrite data\n",
+			__func__, idx);
+
+#if !defined(TFA_USE_STC_VOLUME_TABLE)
+	data[idx] = value;
+#else
+	data[idx] = tfa_get_sknt_data_from_table(idx, value);
+#endif
+	update[idx] = 1;
+
+	for (i = 0; i < ndev; i++) {
+		pm = tfa_get_power_state(i);
+		if (pm & 0x4) { /* count power down */
+			pr_info("%s: tfa_stc - dev %d: check power down\n",
+				__func__, i);
+			ready++;
+			continue;
+		}
+
+		if (update[i] > 0)
+			ready++;
+	}
+
+	if (ready < ndev)
+		/* wait until all the active devices are ready */
+		return ret;
+
+	pr_info("%s: tfa_stc - write volume for stc\n",
+		__func__);
+
+	tfa98xx = (struct tfa98xx *)tfa->data;
+
+	mutex_lock(&tfa98xx->dsp_lock);
+	tfa->individual_msg = 1;
+	ret = tfa_write_volume(tfa, data);
+	mutex_unlock(&tfa98xx->dsp_lock);
+	if (ret) {
+		pr_info("%s: tfa_stc failed to write data to amplifier\n",
+			__func__);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ndev; i++)
+		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
+			(update[i]) ? "*" : "", data[i]);
+
+	pr_info("%s: tfa_stc - reset update after setting\n",
+		__func__);
+	memset(update, 0, ndev * sizeof(int));
+
+	return ret;
+}
+EXPORT_SYMBOL(tfa98xx_write_sknt_control);
+#endif /* TFA_USE_TFASTC_NODE */
 
 static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	const struct i2c_device_id *id)

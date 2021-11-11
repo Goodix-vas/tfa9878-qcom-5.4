@@ -40,6 +40,7 @@ enum tfa_sysfs_device_id {
 	DEV_ID_TFA_CAL,
 	DEV_ID_TFA_LOG,
 	DEV_ID_TFA_VVAL,
+	DEV_ID_TFA_STC,
 	DEV_ID_TFA_MAX
 };
 
@@ -51,6 +52,9 @@ void tfa98xx_log_exit(struct class *tfa_class);
 
 int tfa98xx_vval_init(struct class *tfa_class);
 void tfa98xx_vval_exit(struct class *tfa_class);
+
+int tfa98xx_stc_init(struct class *tfa_class);
+void tfa98xx_stc_exit(struct class *tfa_class);
 
 #endif /* __TFA_SYSFS_INC__ */
 

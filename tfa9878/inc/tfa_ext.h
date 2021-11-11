@@ -56,4 +56,7 @@ int tfa98xx_set_blackbox(int enable);
 int tfa98xx_get_blackbox_data(int dev, int *data);
 int tfa98xx_get_blackbox_data_index(int dev, int index, int reset);
 
+int tfa98xx_update_spkt_data(int idx);
+int tfa98xx_write_sknt_control(int idx, int value);
+
 #endif /* TFA_SRC_TFA_EXT_H_ */

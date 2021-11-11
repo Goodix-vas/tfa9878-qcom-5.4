@@ -40,10 +40,15 @@ TFA_USE_TFA_CLASS        =1
 TFA_USE_TFACAL_NODE      =1
 #TFA_USE_TFALOG_NODE      =1
 TFA_USE_TFAVVAL_NODE     =1
+TFA_USE_TFASTC_NODE      =1
 #TFA_STEREO_NODE          =1
 TFA_READ_REFERENCE_TEMP  =1
 TFA_USE_POWER_SUPPLY     =1
 #TFA_USE_THERMAL_SENSOR   =1
+#TFA_USE_STC_MEMTRACK     =1
+#TFA_USE_STC_VOLUME_TABLE =1
+TFA_USE_CUSTOM_SET_TSURF =1
+TFA_ENABLE_STC_TUNING    =1
 
 TFA98XX_FLAGS            := -DUSE_TFA9878 -DQPLATFORM
 
@@ -155,6 +160,9 @@ endif
 ifdef TFA_USE_TFAVVAL_NODE
 ccflags-y               += -DTFA_USE_TFAVVAL_NODE
 endif
+ifdef TFA_USE_TFASTC_NODE
+ccflags-y               += -DTFA_USE_TFASTC_NODE
+endif
 ifdef TFA_STEREO_NODE
 ccflags-y               += -DTFA_STEREO_NODE
 endif
@@ -166,6 +174,18 @@ ccflags-y               += -DTFA_USE_POWER_SUPPLY
 endif
 ifdef TFA_USE_THERMAL_SENSOR
 ccflags-y               += -DTFA_USE_THERMAL_SENSOR
+endif
+ifdef TFA_USE_STC_MEMTRACK
+ccflags-y               += -DTFA_USE_STC_MEMTRACK
+endif
+ifdef TFA_USE_STC_VOLUME_TABLE
+ccflags-y               += -DTFA_USE_STC_VOLUME_TABLE
+endif
+ifdef TFA_USE_CUSTOM_SET_TSURF
+ccflags-y               += -DTFA_USE_CUSTOM_SET_TSURF
+endif
+ifdef TFA_ENABLE_STC_TUNING
+ccflags-y               += -DTFA_ENABLE_STC_TUNING
 endif
 
 # objs
@@ -204,6 +224,13 @@ else
 snd-soc-tfa98xx-objs    += tfa_vval.o
 endif
 endif
+ifdef TFA_USE_TFASTC_NODE
+ifdef TFA_KERNEL_MODULE
+snd-soc-tfa_sysfs-objs  += tfa_stc.o
+else
+snd-soc-tfa98xx-objs    += tfa_stc.o
+endif
+endif
 endif
 
 # CFLAGS
@@ -224,6 +251,9 @@ CFLAGS_tfa_log.o       += $(TFA98XX_FLAGS)
 endif
 ifdef TFA_USE_TFAVVAL_NODE
 CFLAGS_tfa_vval.o      += $(TFA98XX_FLAGS)
+endif
+ifdef TFA_USE_TFASTC_NODE
+CFLAGS_tfa_stc.o      += $(TFA98XX_FLAGS)
 endif
 endif
 
