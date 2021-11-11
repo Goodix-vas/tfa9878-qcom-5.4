@@ -55,7 +55,6 @@
 #define WRITE_CALIBRATION_DATA_TO_MTP
 #define CHECK_CALIBRATION_DATA_RANGE
 #define SET_CALIBRATION_AT_ALL_DEVICE_READY
-#undef SET_DUMMY_CALIBRATION_VALUE
 #define WRITE_CALIBRATION_DATA_PARTLY
 #define TRACE_STATUS_AT_CALIBRATION
 #define DETECT_VVAL_WITH_EVENT
@@ -3548,6 +3547,9 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 #if defined(CHECK_CALIBRATION_DATA_RANGE)
 	enum tfa_error ret = tfa_error_ok;
 #endif
+#if defined(TFA_USE_DUMMY_CAL)
+	int cal_ready = 1;
+#endif
 
 	/* at initial device only: to reset need_cal and is_bypass */
 	if (tfa_count_status_flag(tfa, TFA_SET_CONFIG) == 0) {
@@ -3656,15 +3658,22 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 	pr_info("%s: config_count=%d\n", __func__,
 		tfa_count_status_flag(tfa, TFA_SET_CONFIG));
 
-#if defined(SET_DUMMY_CALIBRATION_VALUE)
-	if (need_cal == 1) {
-		value = 7000; /* nominal calibration data */
+#if defined(TFA_USE_DUMMY_CAL)
+	/* calibration is not available if not all devices are active */
+	cal_ready = (tfa->active_count < tfa->dev_count) ? 0 : 1;
+#if defined(TFA_DISABLE_AUTO_CAL)
+	cal_ready &= (tfa->disable_auto_cal) ? 0 : 1;
+#endif
+	if (need_cal == 1 && cal_ready == 0) {
+		value = tfa->dummy_cal;
+		if (value == 0) /* use default calibration data */
+			value = DUMMY_CALIBRATION_DATA;
 		dsp_cal_value[channel] = TFA_ReZ_CALC(value, TFA_FW_ReZ_SHIFT);
 		need_cal = 0;
-		pr_info("%s: set dummy value to void calibration by force - for test\n",
-			__func__);
+		pr_info("%s: dev %d, use dummy value (%d) instead, when not available\n",
+			__func__, tfa->dev_idx, value);
 	}
-#endif
+#endif /* TFA_USE_DUMMY_CAL */
 
 #if !defined(TRACE_STATUS_AT_CALIBRATION)
 	if (tfa->verbose)
@@ -5233,6 +5242,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 	int forced = 0;
 	int tfa_state_before, tfa_state;
 	char prof_name[MAX_CONTROL_NAME] = {0};
+	int cal_ready = 1;
 
 	tfa98xx_log_start_cnt++;
 
@@ -5269,6 +5279,12 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 				__func__, tfa->dev_idx);
 			err = (enum tfa98xx_error)
 				tfa_dev_stop(tfa); /* stop inactive handle */
+
+#if defined(TFA_USE_DUMMY_CAL)
+			/* skip resetting MTPEX unless all are active */
+			if (tfa->is_probus_device)
+				tfa->reset_mtpex = 0;
+#endif
 
 			goto tfa_dev_start_exit;
 		}
@@ -5336,14 +5352,26 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 			forced = 1;
 			tfa->reset_mtpex = 1;
 		}
-#if !defined(SET_DUMMY_CALIBRATION_VALUE)
-		cal_profile = tfa_cont_get_cal_profile(tfa);
-		if (cal_profile >= 0) {
-			pr_info("%s: set profile for calibration profile %d\n",
-				__func__, cal_profile);
-			next_profile = cal_profile;
+#if defined(TFA_USE_DUMMY_CAL)
+		cal_ready = (tfa->active_count < tfa->dev_count) ? 0 : 1;
+#if defined(TFA_DISABLE_AUTO_CAL)
+		cal_ready &= (tfa->disable_auto_cal) ? 0 : 1;
+#endif
+#endif /* TFA_USE_DUMMY_CAL */
+		if (cal_ready) {
+			cal_profile = tfa_cont_get_cal_profile(tfa);
+			if (cal_profile >= 0) {
+				pr_info("%s: set profile for calibration profile %d\n",
+					__func__, cal_profile);
+				next_profile = cal_profile;
+			}
+		} else {
+			pr_info("%s: keep using profile (%d) and use dummy value if unavailable\n",
+				__func__, next_profile);
+			/* skip resetting MTPEX unless all are active */
+			if (tfa->is_probus_device)
+				tfa->reset_mtpex = 0;
 		}
-#endif /* SET_DUMMY_CALIBRATION_VALUE */
 		tfa->first_after_boot = 1;
 	}
 
@@ -6885,6 +6913,9 @@ int tfa_dev_probe(int resp_addr, struct tfa_device *tfa)
 
 	tfa->in_use = 1;
 	tfa->is_calibrating = 0;
+#if defined(TFA_DISABLE_AUTO_CAL)
+	tfa->disable_auto_cal = 1;
+#endif
 #if defined(TFA_USE_TFAVVAL_NODE)
 	tfa->vval_active = 0;
 	tfa->vval_result = VVAL_UNTESTED;

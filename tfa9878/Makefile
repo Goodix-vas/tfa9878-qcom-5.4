@@ -45,7 +45,9 @@ TFA_REDUCE_BYPASS_GAIN   =1
 ifeq ($(CONFIG_PLATFORM_QUALCOMM),y)
 TFA_SET_IPC_PORT_ID      =1
 endif
+TFA_DISABLE_AUTO_CAL     =1
 TFA_LIMIT_CAL_FROM_DTS   =1
+TFA_USE_DUMMY_CAL        =1
 TFA_BLACKBOX_LOGGING     =1
 TFA_USE_TFA_CLASS        =1
 TFA_USE_TFACAL_NODE      =1
@@ -167,8 +169,14 @@ endif
 ifdef TFA_SET_IPC_PORT_ID
 ccflags-y               += -DTFA_SET_IPC_PORT_ID
 endif
+ifdef TFA_DISABLE_AUTO_CAL
+ccflags-y               += -DTFA_DISABLE_AUTO_CAL
+endif
 ifdef TFA_LIMIT_CAL_FROM_DTS
 ccflags-y               += -DTFA_LIMIT_CAL_FROM_DTS
+endif
+ifdef TFA_USE_DUMMY_CAL
+ccflags-y               += -DTFA_USE_DUMMY_CAL
 endif
 ifdef TFA_BLACKBOX_LOGGING
 ccflags-y               += -DTFA_BLACKBOX_LOGGING

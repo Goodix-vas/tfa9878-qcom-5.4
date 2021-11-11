@@ -246,6 +246,12 @@ struct tfa_device {
 	int vval_active;
 	int vval_result; /* 0: pass, 1: fail */
 #endif
+#if defined(TFA_DISABLE_AUTO_CAL)
+	int disable_auto_cal;
+#endif
+#if defined(TFA_USE_DUMMY_CAL)
+	int dummy_cal;
+#endif
 };
 
 /*

@@ -1610,6 +1610,9 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 	int mtpex[MAX_HANDLES] = {0};
 	int re25;
 #endif
+#if defined(TFA_DISABLE_AUTO_CAL)
+	int temp_calflag = 0;
+#endif
 
 	pr_info("%s: begin\n", __func__);
 
@@ -1668,6 +1671,15 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		/* EXT_TEMP */
 		tfa98xx_set_exttemp(tfa, temp_val);
 #endif /* TFA_USE_TFAVVAL_NODE */
+
+#if defined(TFA_DISABLE_AUTO_CAL)
+		pr_info("%s: dev %d - force to enable auto calibration (%s -> enabled)",
+			__func__, idx,
+			(tfa->disable_auto_cal) ? "disabled" : "enabled");
+		/* enable auto calibration */
+		temp_calflag |= tfa->disable_auto_cal;
+		tfa->disable_auto_cal = 0;
+#endif /* TFA_DISABLE_AUTO_CAL */
 
 #if defined(TFA_MIXER_ON_DEVICE)
 		/* force to enable all the devices */
@@ -1741,6 +1753,20 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		}
 	}
 #endif
+
+#if defined(TFA_DISABLE_AUTO_CAL)
+	pr_info("%s: restore flag for auto calibration (enabled -> %s)",
+		__func__,
+		(temp_calflag) ? "disabled" : "enabled");
+	for (idx = 0; idx < ndev; idx++) {
+		tfa = tfa98xx_get_tfa_device_from_index(idx);
+		if (tfa == NULL)
+			continue;
+
+		/* restore flag for auto calibration */
+		tfa->disable_auto_cal = temp_calflag;
+	}
+#endif /* TFA_DISABLE_AUTO_CAL */
 
 	if (cal_err) {
 		pr_info("%s: calibration failed! (err %d)\n",
@@ -5212,6 +5238,32 @@ static int tfa98xx_parse_limit_cal_dt(struct device *dev,
 }
 #endif /* TFA_LIMIT_CAL_FROM_DTS */
 
+#if defined(TFA_USE_DUMMY_CAL)
+static int tfa98xx_parse_dummy_cal_dt(struct device *dev,
+	struct tfa98xx *tfa98xx, struct device_node *np)
+{
+	u32 value;
+	int err;
+
+	err = of_property_read_u32(np, "dummy-cal", &value);
+	if (err < 0) {
+		tfa98xx->tfa->dummy_cal = DUMMY_CALIBRATION_DATA;
+		return -1;
+	}
+
+	if (value < MIN_CALIBRATION_DATA)
+		tfa98xx->tfa->dummy_cal = MIN_CALIBRATION_DATA;
+	else if (value > MAX_CALIBRATION_DATA)
+		tfa98xx->tfa->dummy_cal = MAX_CALIBRATION_DATA;
+	else
+		tfa98xx->tfa->dummy_cal = value;
+	pr_info("[0x%x] dummy cal : %d\n",
+		tfa98xx->i2c->addr, tfa98xx->tfa->dummy_cal);
+
+	return 0;
+}
+#endif /* TFA_USE_DUMMY_CAL */
+
 static ssize_t tfa98xx_reg_write(struct file *filp, struct kobject *kobj,
 	struct bin_attribute *bin_attr,
 	char *buf, loff_t off, size_t count)
@@ -5671,6 +5723,74 @@ static ssize_t tfa98xx_gain_store(struct device *dev,
 }
 #endif /* GAINFUNC_IN_SYSFS */
 
+#ifdef TFA_DISABLE_AUTO_CAL
+static ssize_t tfa98xx_autocal_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
+	struct tfa_device *tfa = NULL;
+	int count = 0;
+
+	tfa = tfa98xx->tfa;
+	if (!tfa)
+		return -ENODEV;
+	if (tfa->tfa_family == 0) {
+		pr_err("[0x%x] %s: system is not initialized: not probed yet!\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EIO;
+	}
+
+	pr_debug("[0x%x] autocal : %s\n",
+		tfa98xx->i2c->addr,
+		(tfa->disable_auto_cal) ? "disabled" : "enabled");
+	count = snprintf(buf, PAGE_SIZE, "%s\n",
+		(tfa->disable_auto_cal) ? "0 (disabled)" : "1 (enabled)");
+
+	return count;
+}
+
+static ssize_t tfa98xx_autocal_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
+	struct tfa_device *tfa = NULL;
+	int enable = 0;
+
+	if (tfa98xx->tfa->tfa_family == 0) {
+		pr_err("[0x%x] %s: system is not initialized: not probed yet!\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EIO;
+	}
+
+	/* check string length, and account for eol */
+	if (count < 1)
+		return -EINVAL;
+
+	if (!strncmp(buf, "1", 1))
+		enable = 1;
+	else if (!strncmp(buf, "0", 1))
+		enable = 0;
+	else {
+		pr_info("%s: autocal is triggered with %s!\n", __func__, buf);
+		return -EINVAL;
+	}
+
+	pr_info("%s: autocal < %d\n", __func__, enable);
+
+	mutex_lock(&tfa98xx_mutex);
+	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
+		tfa = tfa98xx->tfa;
+		if (tfa == NULL)
+			continue;
+
+		tfa->disable_auto_cal = (enable) ? 0 : 1;
+	}
+	mutex_unlock(&tfa98xx_mutex);
+
+	return count;
+}
+#endif /* TFA_DISABLE_AUTO_CAL */
+
 static struct bin_attribute dev_attr_rw = {
 	.attr = {
 		.name = "rw",
@@ -5741,6 +5861,17 @@ static struct device_attribute dev_attr_gain = {
 	.store = tfa98xx_gain_store,
 };
 #endif /* GAINFUNC_IN_SYSFS */
+
+#if defined(TFA_DISABLE_AUTO_CAL)
+static struct device_attribute dev_attr_autocal = {
+	.attr = {
+		.name = "autocal",
+		.mode = 0600,
+	},
+	.show = tfa98xx_autocal_show,
+	.store = tfa98xx_autocal_store,
+};
+#endif /* TFA_DISABLE_AUTO_CAL */
 
 struct tfa_device *tfa98xx_get_tfa_device_from_index(int index)
 {
@@ -6516,6 +6647,16 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 		}
 	}
 #endif /* TFA_LIMIT_CAL_FROM_DTS */
+#if defined(TFA_USE_DUMMY_CAL)
+	if (np) {
+		ret = tfa98xx_parse_dummy_cal_dt(&i2c->dev, tfa98xx, np);
+		if (ret) {
+			dev_err(&i2c->dev,
+				"Failed to parse DT node for dummy value for calibration\n");
+			/* set default value instead */
+		}
+	}
+#endif /* TFA_USE_DUMMY_CAL */
 
 	/* Modify the stream names, by appending the i2c device address.
 	 * This is used with multicodec, in order to discriminate devices.
@@ -6597,6 +6738,12 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	ret = device_create_file(&i2c->dev, &dev_attr_gain);
 	if (ret)
 		dev_info(&i2c->dev, "error creating sysfs node, gain\n");
+#endif
+
+#ifdef TFA_DISABLE_AUTO_CAL
+	ret = device_create_file(&i2c->dev, &dev_attr_autocal);
+	if (ret)
+		dev_info(&i2c->dev, "error creating sysfs node, autocal\n");
 #endif
 
 	pr_info("%s Probe completed successfully!\n", __func__);
