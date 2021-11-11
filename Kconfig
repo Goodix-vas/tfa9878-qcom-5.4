@@ -173,6 +173,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_TAS6424 if I2C
 	select SND_SOC_TDA7419 if I2C
 	select SND_SOC_TFA9874 if I2C
+	select SND_SOC_TFA9878 if I2C
 	select SND_SOC_TFA9879 if I2C
 	select SND_SOC_TLV320AIC23_I2C if I2C
 	select SND_SOC_TLV320AIC23_SPI if SPI_MASTER
@@ -1074,6 +1075,10 @@ config SND_SOC_TFA9874
 	tristate "NXP Semiconductors TFA9874 amplifier"
 	depends on I2C
 
+config SND_SOC_TFA9878
+	tristate "Goodix TFA9878 amplifier"
+	depends on I2C
+
 config SND_SOC_TFA9879
 	tristate "NXP Semiconductors TFA9879 amplifier"
 	depends on I2C
@@ -1398,5 +1403,8 @@ config SND_SOC_TPA6130A2
 
 # TAS2562
 source "sound/soc/codecs/tas2562/Kconfig"
+
+# TFA9878
+source "techpack/audio/asoc/codecs/tfa9878/Kconfig"
 
 endmenu
