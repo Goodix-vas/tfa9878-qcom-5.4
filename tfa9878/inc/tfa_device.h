@@ -198,6 +198,9 @@ struct tfa_device {
 #if defined(TFA_PAUSE_CONTROL)
 	int pause_state;
 #endif
+#if defined(TFA_TDMSPKG_CONTROL)
+	int spkgain;
+#endif
 #if defined(TFA_CHANGE_PCM_FORMAT)
 	struct tfa98xx_tdm_format tdm_config;
 #endif

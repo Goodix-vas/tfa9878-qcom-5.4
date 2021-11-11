@@ -111,6 +111,14 @@ static void tfa_wait_cal_work(struct work_struct *work)
 			continue;
 		}
 
+#if defined(TFA_TDMSPKG_CONTROL)
+		if (ntfa->spkgain != -1) {
+			pr_info("%s: set speaker gain 0x%x\n",
+				__func__, ntfa->spkgain);
+			TFA7x_SET_BF(ntfa, TDMSPKG,
+				ntfa->spkgain);
+		}
+#endif
 		/* force UNMUTE after processing calibration */
 		pr_debug("%s: [%d] force UNMUTE after processing calibration\n",
 			__func__, ntfa->dev_idx);
@@ -5199,6 +5207,13 @@ void tfa_reset_active_handle(struct tfa_device *tfa)
 
 		ntfa->active_handle = -1;
 		ntfa->active_count = -1;
+
+#if defined(TFA_TDMSPKG_CONTROL)
+		/* reload setting afterwards, if speaker gain is forced */
+		if (ntfa->spkgain != -1)
+			ntfa->first_after_boot = 1;
+		ntfa->spkgain = -1;
+#endif
 	}
 }
 
@@ -6861,6 +6876,9 @@ int tfa_dev_probe(int resp_addr, struct tfa_device *tfa)
 #endif
 #if defined(TFA_PAUSE_CONTROL)
 	tfa->pause_state = 0; /* not paused by default */
+#endif
+#if defined(TFA_TDMSPKG_CONTROL)
+	tfa->spkgain = -1; /* undefined */
 #endif
 
 	tfa_set_query_info(tfa);

@@ -106,6 +106,7 @@ SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 #define TFA_FS_CHECK_MTPEX
 #define CALFUNC_IN_SYSFS
 #define LOGFUNC_IN_SYSFS
+#define GAINFUNC_IN_SYSFS
 
 /* data accessible by all instances */
 /* Memory pool used for DSP messages */
@@ -2014,6 +2015,15 @@ static int tfa98xx_set_vstep(struct snd_kcontrol *kcontrol,
 
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
 		mutex_lock(&tfa98xx->dsp_lock);
+#if defined(TFA_TDMSPKG_CONTROL)
+		if (tfa98xx->tfa->spkgain != -1) {
+			pr_info("%s: set speaker gain 0x%x\n",
+				__func__, tfa98xx->tfa->spkgain);
+			TFA7x_SET_BF(tfa98xx->tfa, TDMSPKG,
+				tfa98xx->tfa->spkgain);
+		}
+#endif
+
 		pr_info("%s: UNMUTE dev %d\n",
 			__func__, tfa98xx->tfa->dev_idx);
 		tfa_dev_set_state(tfa98xx->tfa, TFA_STATE_UNMUTE, 0);
@@ -2186,6 +2196,15 @@ static int tfa98xx_set_profile(struct snd_kcontrol *kcontrol,
 
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
 		mutex_lock(&tfa98xx->dsp_lock);
+#if defined(TFA_TDMSPKG_CONTROL)
+		if (tfa98xx->tfa->spkgain != -1) {
+			pr_info("%s: set speaker gain 0x%x\n",
+				__func__, tfa98xx->tfa->spkgain);
+			TFA7x_SET_BF(tfa98xx->tfa, TDMSPKG,
+				tfa98xx->tfa->spkgain);
+		}
+#endif
+
 		pr_info("%s: UNMUTE dev %d\n",
 			__func__, tfa98xx->tfa->dev_idx);
 		tfa_dev_set_state(tfa98xx->tfa, TFA_STATE_UNMUTE, 0);
@@ -2482,6 +2501,15 @@ static int tfa98xx_set_device_ctl(struct snd_kcontrol *kcontrol,
 			tfa98xx->dsp_init = TFA98XX_DSP_INIT_DONE;
 			tfa98xx_set_dsp_configured(tfa98xx);
 
+#if defined(TFA_TDMSPKG_CONTROL)
+			if (tfa->spkgain != -1) {
+				pr_info("%s: set speaker gain 0x%x\n",
+					__func__, tfa->spkgain);
+				TFA7x_SET_BF(tfa, TDMSPKG,
+					tfa->spkgain);
+			}
+#endif
+
 			pr_info("%s: UNMUTE dev %d\n",
 				__func__, dev);
 			tfa_dev_set_state(tfa, TFA_STATE_UNMUTE, 0);
@@ -2738,6 +2766,15 @@ static int tfa98xx_set_pause_ctl(struct snd_kcontrol *kcontrol,
 			tfa98xx->dsp_init = TFA98XX_DSP_INIT_DONE;
 			tfa98xx_set_dsp_configured(tfa98xx);
 
+#if defined(TFA_TDMSPKG_CONTROL)
+			if (tfa->spkgain != -1) {
+				pr_info("%s: set speaker gain 0x%x\n",
+					__func__, tfa->spkgain);
+				TFA7x_SET_BF(tfa, TDMSPKG,
+					tfa->spkgain);
+			}
+#endif
+
 			pr_info("%s: UNMUTE dev %d\n",
 				__func__, dev);
 			tfa_dev_set_state(tfa, TFA_STATE_UNMUTE, 0);
@@ -2773,6 +2810,79 @@ static int tfa98xx_set_pause_ctl(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 #endif /* TFA_PAUSE_CONTROL */
+
+#if defined(TFA_TDMSPKG_CONTROL)
+static int tfa98xx_info_spkgain(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	mutex_lock(&tfa98xx_mutex);
+	uinfo->count = tfa98xx_device_count;
+	mutex_unlock(&tfa98xx_mutex);
+	uinfo->value.integer.min = 0x0;
+	uinfo->value.integer.max = 0xf;
+
+	return 0;
+}
+
+static int tfa98xx_get_spkgain(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct tfa98xx *tfa98xx;
+	struct tfa_device *tfa = NULL;
+	int spkgain;
+
+	mutex_lock(&tfa98xx_mutex);
+	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
+		tfa = tfa98xx->tfa;
+		if (tfa == NULL)
+			continue;
+
+		spkgain = tfa->spkgain;
+		if (spkgain == -1) {
+			spkgain = TFA7x_GET_BF(tfa, TDMSPKG);
+			pr_info("%s: [%d] read current speaker gain 0x%x\n",
+				__func__, tfa->dev_idx, spkgain);
+		}
+
+		ucontrol->value.integer.value[tfa->dev_idx] = spkgain;
+	}
+	mutex_unlock(&tfa98xx_mutex);
+
+	return 0;
+}
+
+static int tfa98xx_set_spkgain(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct tfa98xx *tfa98xx;
+	struct tfa_device *tfa = NULL;
+	enum tfa98xx_error err;
+	int dev;
+	int cur_spkgain;
+
+	mutex_lock(&tfa98xx_mutex);
+	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
+		tfa = tfa98xx->tfa;
+		if (tfa == NULL)
+			continue;
+
+		dev = tfa->dev_idx;
+		tfa->spkgain = ucontrol->value.integer.value[dev];
+
+		cur_spkgain = TFA7x_GET_BF(tfa, TDMSPKG);
+		pr_info("%s: [%d] set spekaer gain 0x%x (currently, 0x%x)\n",
+			__func__, dev, tfa->spkgain, cur_spkgain);
+		err = TFA7x_SET_BF(tfa, TDMSPKG, tfa->spkgain);
+		if (err)
+			pr_err("%s: [%d] failed to set speaker gain\n",
+				__func__, dev);
+	}
+	mutex_unlock(&tfa98xx_mutex);
+
+	return 1;
+}
+#endif /* TFA_TDMSPKG_CONTROL */
 
 static int tfa98xx_info_cal_ctl(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_info *uinfo)
@@ -2855,6 +2965,9 @@ static int tfa98xx_create_controls(struct tfa98xx *tfa98xx)
 #endif
 #if defined(TFA_PAUSE_CONTROL)
 	nr_controls += 1; /* set pause */
+#endif
+#if defined(TFA_TDMSPKG_CONTROL)
+	nr_controls += 1; /* set speaker gain */
 #endif
 
 	if (tfa98xx->flags & TFA98XX_FLAG_CALIBRATION_CTL)
@@ -3013,6 +3126,21 @@ static int tfa98xx_create_controls(struct tfa98xx *tfa98xx)
 	tfa98xx_controls[mix_index].info = tfa98xx_info_pause_ctl;
 	tfa98xx_controls[mix_index].get = tfa98xx_get_pause_ctl;
 	tfa98xx_controls[mix_index].put = tfa98xx_set_pause_ctl;
+	mix_index++;
+#endif
+
+#if defined(TFA_TDMSPKG_CONTROL)
+	/* set speaker gain by force */
+	name = devm_kzalloc(cdev, MAX_CONTROL_NAME, GFP_KERNEL);
+	if (!name)
+		return -ENOMEM;
+
+	scnprintf(name, MAX_CONTROL_NAME, "%s Gain", tfa98xx->fw.name);
+	tfa98xx_controls[mix_index].name = name;
+	tfa98xx_controls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	tfa98xx_controls[mix_index].info = tfa98xx_info_spkgain;
+	tfa98xx_controls[mix_index].get = tfa98xx_get_spkgain;
+	tfa98xx_controls[mix_index].put = tfa98xx_set_spkgain;
 	mix_index++;
 #endif
 
@@ -4302,6 +4430,14 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 				continue;
 			}
 
+#if defined(TFA_TDMSPKG_CONTROL)
+			if (ntfa->spkgain != -1) {
+				pr_info("%s: set speaker gain 0x%x\n",
+					__func__, ntfa->spkgain);
+				TFA7x_SET_BF(ntfa, TDMSPKG,
+					ntfa->spkgain);
+			}
+#endif
 			pr_info("%s: UNMUTE dev %d\n",
 				__func__, ntfa->dev_idx);
 			tfa_dev_set_state(ntfa,
@@ -5494,6 +5630,47 @@ static ssize_t tfa98xx_blackbox_store(struct device *dev,
 }
 #endif /* LOGFUNC_IN_SYSFS */
 
+#ifdef GAINFUNC_IN_SYSFS
+static ssize_t tfa98xx_gain_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct tfa98xx *tfa98xx = dev_get_drvdata(dev);
+	int count = 0;
+	int spkgain, ampgain;
+
+	if (tfa98xx->tfa->tfa_family == 0) {
+		pr_err("[0x%x] %s: system is not initialized: not probed yet!\n",
+			tfa98xx->i2c->addr, __func__);
+		return -EIO;
+	}
+
+	mutex_lock(&tfa98xx->dsp_lock);
+	spkgain = TFA7x_GET_BF(tfa98xx->tfa, TDMSPKG);
+	ampgain = TFA7x_GET_BF(tfa98xx->tfa, AMPGAIN);
+	mutex_unlock(&tfa98xx->dsp_lock);
+
+	if (spkgain < 0 || ampgain < 0) {
+		pr_err("[0x%x] Unable to access TDMSPKG / AMPGAIN: (%d, %d)\n",
+			tfa98xx->i2c->addr, spkgain, ampgain);
+		return -EIO;
+	}
+
+	pr_debug("[0x%x] TDMSPKG : %d, AMPGAIN : %d\n",
+		tfa98xx->i2c->addr, spkgain, ampgain);
+	count = snprintf(buf, PAGE_SIZE, "[0x%02x] TDMSPKG %d, AMAPGAIN %d\n",
+		tfa98xx->i2c->addr, spkgain, ampgain);
+
+	return count;
+}
+
+static ssize_t tfa98xx_gain_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	/* to prevent attack to tfa98xx_re25_store */
+	return count;
+}
+#endif /* GAINFUNC_IN_SYSFS */
+
 static struct bin_attribute dev_attr_rw = {
 	.attr = {
 		.name = "rw",
@@ -5553,6 +5730,17 @@ static struct device_attribute dev_attr_blackbox = {
 	.store = tfa98xx_blackbox_store,
 };
 #endif /* LOGFUNC_IN_SYSFS */
+
+#ifdef GAINFUNC_IN_SYSFS
+static struct device_attribute dev_attr_gain = {
+	.attr = {
+		.name = "gain",
+		.mode = 0600,
+	},
+	.show = tfa98xx_gain_show,
+	.store = tfa98xx_gain_store,
+};
+#endif /* GAINFUNC_IN_SYSFS */
 
 struct tfa_device *tfa98xx_get_tfa_device_from_index(int index)
 {
@@ -6403,6 +6591,12 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	ret = device_create_file(&i2c->dev, &dev_attr_blackbox);
 	if (ret)
 		dev_info(&i2c->dev, "error creating sysfs node, log\n");
+#endif
+
+#ifdef GAINFUNC_IN_SYSFS
+	ret = device_create_file(&i2c->dev, &dev_attr_gain);
+	if (ret)
+		dev_info(&i2c->dev, "error creating sysfs node, gain\n");
 #endif
 
 	pr_info("%s Probe completed successfully!\n", __func__);
