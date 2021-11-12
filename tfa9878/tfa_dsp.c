@@ -5400,7 +5400,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 
 	mutex_lock(&dev_lock);
 
-	tfa_set_status_flag(tfa, TFA_SET_DEVICE, 1);;
+	tfa_set_status_flag(tfa, TFA_SET_DEVICE, 1);
 
 	if (tfa->bus != 0) { /* non i2c */
 #ifndef __KERNEL__
@@ -7023,15 +7023,16 @@ enum tfa_error tfa_dev_set_state(struct tfa_device *tfa,
 			if ((tfa->rev & 0xff) == 0x13) {
 				ret = tfa98xx_faim_protect(tfa, 0);
 				if (tfa->verbose)
-					pr_debug("FAIM disabled (err %d).\n", ret);
+					pr_debug("%s: FAIM disabled (err %d).\n",
+						__func__, ret);
 			}
 		}
 
 		/* Synchonize I/V delay on 96/97 at cold start */
 		if (tfa->sync_iv_delay) {
 			if (tfa->verbose)
-				pr_debug("syncing I/V delay for %x\n",
-					(tfa->rev & 0xff));
+				pr_debug("%s: syncing I/V delay for %x\n",
+					__func__, (tfa->rev & 0xff));
 
 			/* wait for ACS to be cleared */
 			count = ACS_RESET_WAIT_NTRIES;
@@ -7923,7 +7924,7 @@ enum tfa98xx_error tfa_read_tspkr(struct tfa_device *tfa, int *spkt)
 	buffer[offset++] = (uint8_t)((spkr_count >> 8) & 0xff);
 	buffer[offset++] = (uint8_t)(spkr_count & 0xff);
 
-	for(i = 0; i < spkr_count; i++) {
+	for (i = 0; i < spkr_count; i++) {
 		addr = TSPKR_ADDR + i; /* TSpkr address */
 
 		/* indexed address + snapshot */
@@ -8037,7 +8038,7 @@ enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt)
 
 	for (i = 0; i < spkr_count; i++) {
 #if defined(TFA_USE_STC_VOLUME_TABLE)
-		stcontrol[i] = (stcontrol[i] < 0xff) ? stcontrol[i]: 0xff;
+		stcontrol[i] = (stcontrol[i] < 0xff) ? stcontrol[i] : 0xff;
 		pr_info("%s: dev %d - volume index (%d)\n",
 			__func__, i, stcontrol[i]);
 		data = stcontrol[i];
@@ -8045,12 +8046,14 @@ enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt)
 		/* 10-bit signed integer */
 		if (stcontrol[i] >= TFA2_FW_T_DATA_MAX) {
 			pr_info("%s: dev %d - data overflow (%d), to set max (%d)\n",
-				__func__, i, stcontrol[i], TFA2_FW_T_DATA_MAX - 1);
+				__func__, i, stcontrol[i],
+				TFA2_FW_T_DATA_MAX - 1);
 			stcontrol[i] = TFA2_FW_T_DATA_MAX - 1;
 		}
 		if (stcontrol[i] < -TFA2_FW_T_DATA_MAX) {
 			pr_info("%s: dev %d - data overflow (%d), to set min (%d)\n",
-				__func__, i, stcontrol[i], -TFA2_FW_T_DATA_MAX);
+				__func__, i, stcontrol[i],
+				-TFA2_FW_T_DATA_MAX);
 			stcontrol[i] = -TFA2_FW_T_DATA_MAX;
 		}
 		pr_info("%s: dev %d - surface temperature (%d)\n",

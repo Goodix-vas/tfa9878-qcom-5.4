@@ -216,7 +216,8 @@ static ssize_t validation_store(struct device *dev,
 		return -EINVAL;
 	}
 	if (cur_status)
-		pr_info("%s: tfa_vval prior V validation still runs\n", __func__);
+		pr_info("%s: tfa_vval prior V validation still runs\n",
+			__func__);
 
 	pr_info("%s: tfa_vval begin\n", __func__);
 
