@@ -5251,7 +5251,7 @@ static int tfa98xx_parse_dummy_cal_dt(struct device *dev,
 	err = of_property_read_u32(np, "dummy-cal", &value);
 	if (err < 0) {
 		tfa98xx->tfa->dummy_cal = DUMMY_CALIBRATION_DATA;
-		return -1;
+		return TFA_NOT_FOUND;
 	}
 
 	if (value < MIN_CALIBRATION_DATA)
