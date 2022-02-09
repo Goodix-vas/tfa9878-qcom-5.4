@@ -125,6 +125,8 @@ int tfa98xx_get_fssel(unsigned int rate);
 struct tfa_device *tfa98xx_get_tfa_device_from_index(int index);
 struct tfa_device *tfa98xx_get_tfa_device_from_channel(int channel);
 
+int tfa_get_channel_from_dev_idx(struct tfa_device *tfa, int dev_idx);
+
 int tfa98xx_count_active_stream(int stream_flag);
 
 int tfa_ext_event_handler(enum tfadsp_event_en tfadsp_event);

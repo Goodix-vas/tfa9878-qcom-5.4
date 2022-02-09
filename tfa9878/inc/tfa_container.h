@@ -154,6 +154,14 @@ int tfa_cont_get_cal_profile(struct tfa_device *tfa);
 int tfa_cont_is_tap_profile(struct tfa_device *tfa, int prof_idx);
 
 /*
+ * Is the profile a standby profile ?
+ * @param tfa the device struct pointer
+ * @param prof_idx the index of the profile
+ * @return 1 if the profile is a standby profile or 0 if not
+ */
+int tfa_cont_is_standby_profile(struct tfa_device *tfa, int prof_idx);
+
+/*
  * Is the profile specific to device ?
  * @param dev_idx the index of the device
  * @param prof_idx the index of the profile
