@@ -831,6 +831,12 @@ int is_94_N2_device(struct tfa_device *tfa);
 #endif
 
 /*
+ * Get manstate from device
+ * @param tfa the device struct pointer
+ */
+int tfa_get_manstate(struct tfa_device *tfa);
+
+/*
  * write/read raw msg functions:
  * the buffer is provided in little endian format, each word occupying
  * 3 bytes, length is in bytes.

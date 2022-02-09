@@ -60,6 +60,7 @@
 #define TFA98XX_VERSION	TFA98XX_API_REV_STR
 
 #define TFA_SET_DAPM_IGNORE_SUSPEND
+#define TFA_STOP_AND_RESTART_FOR_CALIBRATION
 
 /* Change volume selection behavior:
  * Uncomment following line to generate a profile change when updating
@@ -606,7 +607,7 @@ static int tfa98xx_dbgfs_mtpex_set(void *data, u64 val)
 
 	ndev = tfa98xx->tfa->dev_count;
 	for (idx = 0; idx < ndev; idx++) {
-		ntfa = tfa98xx_get_tfa_device_from_channel(idx);
+		ntfa = tfa98xx_get_tfa_device_from_index(idx);
 		if (ntfa == NULL)
 			continue;
 		tfa98xx_set_exttemp(ntfa, (short)temp_val);
@@ -1685,8 +1686,15 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		/* force to enable all the devices */
 		tfa->set_active = 1;
 #endif
+
+		/* force to mute amplifier to flush buffer */
+		tfa_run_mute(tfa);
 	}
 
+	/* wait before restarting for calibration */
+	msleep_interruptible(10);
+
+#if defined(TFA_STOP_AND_RESTART_FOR_CALIBRATION)
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
 		pr_info("%s: dev %d - stopping devices\n",
 			__func__, tfa98xx->tfa->dev_idx);
@@ -1702,6 +1710,7 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 
 		mutex_unlock(&tfa98xx->dsp_lock);
 	}
+#endif /* TFA_STOP_AND_RESTART_FOR_CALIBRATION */
 
 	pr_info("%s: calibration started!\n", __func__);
 
@@ -2662,8 +2671,9 @@ static int tfa98xx_set_mute_ctl(struct snd_kcontrol *kcontrol,
 		/* exit if stream is not ready for initialization */
 		if (tfa98xx->pstream == 0
 			&& tfa98xx->samstream == 0) {
-			pr_info("%s: [%d] cannot unmute unless p/samstream is on\n",
-				__func__, dev);
+			pr_info("%s: [%d] skip request (%s) unless p/samstream is on\n",
+				__func__, dev,
+				(request == 1) ? "mute" : "unmute");
 			continue;
 		}
 
@@ -4310,7 +4320,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 			tfa98xx->profile, tfa98xx->vstep);
 		if (ret == TFA98XX_ERROR_NOT_SUPPORTED) {
 			tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_FAIL;
-			dev_err(tfa98xx->dev, "Failed starting device\n");
+			dev_err(tfa98xx->dev, "Failed in starting device\n");
 			failed = true;
 		} else if (ret != TFA98XX_ERROR_OK) {
 			/* It may fail as we may not have a valid clock at that
@@ -4327,7 +4337,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 			/* Subsystem ready, tfa init complete */
 			tfa98xx->dsp_init = TFA98XX_DSP_INIT_DONE;
 			dev_dbg(tfa98xx->dev,
-				"tfa_dev_start success (%d)\n",
+				"tfa_dev_start succeeded! (%d)\n",
 				tfa98xx->init_count);
 #if !defined(TFA_USE_DIRECT_API_CALL)
 			/* cancel other pending init works */
@@ -4338,7 +4348,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 	} else {
 		/* exceeded max number ot start tentatives, cancel start */
 		dev_err(tfa98xx->dev,
-			"Failed starting device (%d)\n",
+			"Failed in starting device (%d)\n",
 			tfa98xx->init_count);
 		failed = true;
 #if defined(TFA_BYPASS_AT_START_FAILURE)
@@ -4356,11 +4366,11 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 		tfa98xx->profile, tfa98xx->vstep);
 	if (ret == TFA98XX_ERROR_NOT_SUPPORTED) {
 		tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_FAIL;
-		dev_err(tfa98xx->dev, "Failed starting device\n");
+		dev_err(tfa98xx->dev, "Failed in starting device\n");
 		failed = true;
 	} else if (ret != TFA98XX_ERROR_OK) {
 		dev_err(tfa98xx->dev,
-			"Failed starting device (err %d) - %d\n",
+			"Failed in starting device (err %d; count %d)\n",
 			ret, tfa98xx->init_count);
 		failed = true;
 #if defined(TFA_BYPASS_AT_START_FAILURE)
@@ -4378,7 +4388,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 		/* Subsystem ready, tfa init complete */
 		tfa98xx->dsp_init = TFA98XX_DSP_INIT_DONE;
 		dev_dbg(tfa98xx->dev,
-			"tfa_dev_start success (%d)\n",
+			"tfa_dev_start succeeded! (%d)\n",
 			tfa98xx->init_count);
 #if !defined(TFA_USE_DIRECT_API_CALL)
 		/* cancel other pending init works */
@@ -4456,6 +4466,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 				continue;
 			}
 
+			mutex_lock(&tfa98xx->dsp_lock);
 #if defined(TFA_TDMSPKG_CONTROL)
 			if (ntfa->spkgain != -1) {
 				pr_info("%s: set speaker gain 0x%x\n",
@@ -4469,7 +4480,6 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 			tfa_dev_set_state(ntfa,
 				TFA_STATE_UNMUTE, 0);
 
-			mutex_lock(&tfa98xx->dsp_lock);
 			/*
 			 * start monitor thread to check IC status bit
 			 * periodically, and re-init IC to recover if
@@ -5248,7 +5258,7 @@ static int tfa98xx_parse_dummy_cal_dt(struct device *dev,
 	err = of_property_read_u32(np, "dummy-cal", &value);
 	if (err < 0) {
 		tfa98xx->tfa->dummy_cal = DUMMY_CALIBRATION_DATA;
-		return -1;
+		return TFA_NOT_FOUND;
 	}
 
 	if (value < MIN_CALIBRATION_DATA)
@@ -5508,7 +5518,7 @@ static ssize_t tfa98xx_mtpex_store(struct device *dev,
 
 	ndev = tfa98xx->tfa->dev_count;
 	for (idx = 0; idx < ndev; idx++) {
-		ntfa = tfa98xx_get_tfa_device_from_channel(idx);
+		ntfa = tfa98xx_get_tfa_device_from_index(idx);
 		if (ntfa == NULL)
 			continue;
 		tfa98xx_set_exttemp(ntfa, (short)temp_val);
@@ -5609,7 +5619,7 @@ static ssize_t tfa98xx_blackbox_show(struct device *dev,
 
 	for (idx = 0; idx < ndev; idx++) {
 		offset = idx * ID_BLACKBOX_MAX;
-		ntfa = tfa98xx_get_tfa_device_from_channel(idx);
+		ntfa = tfa98xx_get_tfa_device_from_index(idx);
 		if (ntfa == NULL)
 			continue;
 		addr = ntfa->resp_address;
@@ -6345,6 +6355,18 @@ int tfa98xx_update_spkt_data(int idx)
 		return DEFAULT_REF_TEMP;
 	}
 
+	if (tfa->is_bypass) {
+		pr_info("%s: skipped - tfadsp in bypass\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
+	if (tfa->is_calibrating) {
+		pr_info("%s: skipped - tfadsp is running calibraion!\n",
+			__func__);
+		return DEFAULT_REF_TEMP;
+	}
+
 #if defined(TFA_USE_DEFAULT_TEMP_IN_LPM)
 	pm = tfa_get_power_state(idx);
 	pr_info("%s: tfa_stc - dev %d - power state 0x%x\n",
@@ -6402,18 +6424,35 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		return -EINVAL;
 
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
-		pr_info("%s: skipped - tfadsp is not active!\n",
+		pr_info("%s: skipped - no active stream!\n",
 			__func__);
-		return -ENODEV;
+		goto tfa98xx_write_sknt_control_exit;
 	}
 
-#if defined(TFA_RESET_STC_VOLUME_IN_LPM)
-	pm = tfa_get_power_state(idx);
-	pr_info("%s: tfa_stc - dev %d - power state 0x%x\n",
-		__func__, idx, pm);
+	if (tfa->is_bypass) {
+		pr_info("%s: skipped - tfadsp in bypass\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
 
-	if (pm > 0) /* reset gain in low power state */
+	if (tfa->is_calibrating) {
+		pr_info("%s: skipped - tfadsp is running calibraion!\n",
+			__func__);
+		goto tfa98xx_write_sknt_control_exit;
+	}
+
+	pm = tfa_get_power_state(idx);
+	if (pm & 0x4) { /* skip if device is powered down */
+		pr_info("%s: tfa_stc - skip dev %d - power state 0x%x\n",
+			__func__, idx, pm);
+		return ret;
+	}
+#if defined(TFA_RESET_STC_VOLUME_IN_LPM)
+	if (pm > 0) { /* reset gain in low power state */
+		pr_info("%s: tfa_stc - dev %d - set default - power state 0x%x\n",
+			__func__, idx, pm);
 		value = DEFAULT_REF_TEMP;
+	}
 #endif /* TFA_RESET_STC_VOLUME_IN_LPM */
 
 	pr_info("%s: tfa_stc - dev %d - set surface temperature (%d)\n",
@@ -6435,6 +6474,7 @@ int tfa98xx_write_sknt_control(int idx, int value)
 			pr_info("%s: tfa_stc - dev %d: check power down\n",
 				__func__, i);
 			ready++;
+			data[i] = DEFAULT_REF_TEMP;
 			continue;
 		}
 
@@ -6458,14 +6498,15 @@ int tfa98xx_write_sknt_control(int idx, int value)
 	if (ret) {
 		pr_info("%s: tfa_stc failed to write data to amplifier\n",
 			__func__);
-		return -EINVAL;
+		goto tfa98xx_write_sknt_control_exit;
 	}
 
 	for (i = 0; i < ndev; i++)
 		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
 			(update[i]) ? "*" : "", data[i]);
 
-	pr_info("%s: tfa_stc - reset update after setting\n",
+tfa98xx_write_sknt_control_exit:
+	pr_info("%s: tfa_stc - reset update flags\n",
 		__func__);
 	memset(update, 0, ndev * sizeof(int));
 

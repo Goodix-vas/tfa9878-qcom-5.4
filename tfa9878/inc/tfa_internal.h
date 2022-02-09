@@ -64,6 +64,7 @@
 #endif
 
 #define DEFAULT_REF_TEMP 25
+#define TFA_NOT_FOUND -1
 
 enum instream_state {
 	BIT_PSTREAM = 1, /* b0 */
