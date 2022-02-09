@@ -60,6 +60,8 @@
 #define TFA98XX_VERSION	TFA98XX_API_REV_STR
 
 #define TFA_SET_DAPM_IGNORE_SUSPEND
+#define TFA_PRELOAD_SETTING_AT_PROBING
+#undef TFA_CREATE_CONTROL_AT_LAST
 
 /* Change volume selection behavior:
  * Uncomment following line to generate a profile change when updating
@@ -3878,6 +3880,8 @@ static void tfa98xx_container_loaded
 	int container_size;
 #if defined(TFA_PRELOAD_SETTING_AT_PROBING)
 	int ret;
+#endif
+#if defined(TFA_CREATE_CONTROL_AT_LAST)
 	static struct tfa98xx *tfa98xx_main;
 #endif
 #if defined(TFA_FS_CHECK_MTPEX)
@@ -4057,7 +4061,7 @@ static void tfa98xx_container_loaded
 	}
 
 	/* Only controls for main device */
-#if !defined(TFA_PRELOAD_SETTING_AT_PROBING)
+#if !defined(TFA_CREATE_CONTROL_AT_LAST)
 	/* for the first device */
 	if (tfa98xx->tfa->dev_idx == 0)
 		tfa98xx_create_controls(tfa98xx);
@@ -4070,7 +4074,7 @@ static void tfa98xx_container_loaded
 		if (tfa98xx_main != NULL)
 			tfa98xx_create_controls(tfa98xx_main);
 	}
-#endif /* TFA_PRELOAD_SETTING_AT_PROBING */
+#endif /* TFA_CREATE_CONTROL_AT_LAST */
 
 #if (defined(USE_TFA9891) || defined(USE_TFA9912))
 	tfa98xx_inputdev_check_register(tfa98xx);
@@ -4086,12 +4090,11 @@ static void tfa98xx_container_loaded
 #if defined(TFA_PRELOAD_SETTING_AT_PROBING)
 	if (tfa98xx->tfa->tfa_family == 2) {
 		mutex_lock(&tfa98xx->dsp_lock);
+		tfa98xx_set_stream_state(tfa98xx->tfa, 0);
 		ret = tfa98xx_tfa_start(tfa98xx,
 			tfa98xx->profile, tfa98xx->vstep);
 		if (ret == TFA98XX_ERROR_NOT_SUPPORTED)
 			tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_FAIL;
-		if (ret == tfa_error_ok)
-			tfa98xx->tfa->first_after_boot = 2;
 		mutex_unlock(&tfa98xx->dsp_lock);
 	}
 #endif /* TFA_PRELOAD_SETTING_AT_PROBING */

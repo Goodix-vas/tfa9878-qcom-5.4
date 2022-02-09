@@ -874,13 +874,7 @@ enum tfa98xx_error tfa98xx_set_stream_state(struct tfa_device *tfa,
 			__func__, tfa->prev_samstream, cur_samstream);
 
 		/* reload reg at toggling SAMSTREAM */
-#if defined(TFA_PRELOAD_SETTING_AT_PROBING)
-		if ((tfa->first_after_boot != 2)
-			|| (tfa->prev_samstream != -1))
-			tfa->first_after_boot = 1;
-#else
 		tfa->first_after_boot = 1;
-#endif
 
 		tfa->prev_samstream = cur_samstream;
 	}
@@ -3947,13 +3941,10 @@ enum tfa98xx_error tfa_run_speaker_boost(struct tfa_device *tfa,
 		tfa_dev_set_swprof(tfa, (unsigned short)profile);
 		tfa_dev_set_swvstep(tfa, 0);
 
-#if defined(TFADSP_CONFIGURE_AT_FIRST_DEVICE)
-		/* always send the SetRe25 message
-		 * to indicate all messages are sent
-		 */
-		if (tfa->ext_dsp == 1)
-			err = tfa_set_calibration_values_once(tfa);
-#endif /* TFADSP_CONFIGURE_AT_FIRST_DEVICE */
+		/* stop in simple init case, without stream */
+		if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0
+			&& tfa98xx_count_active_stream(BIT_CSTREAM) == 0)
+			return err;
 	}
 
 	/* Synchonize I/V delay on 96/97 at cold start */
@@ -3966,8 +3957,10 @@ enum tfa98xx_error tfa_run_speaker_boost(struct tfa_device *tfa,
 	 * to indicate all messages are sent
 	 */
 	if (value) {
-#if !defined(TFADSP_CONFIGURE_AT_FIRST_DEVICE)
 		if (tfa->ext_dsp == 1) {
+#if defined(TFADSP_CONFIGURE_AT_FIRST_DEVICE)
+			err = tfa_set_calibration_values_once(tfa);
+#else
 			pr_info("%s: [%d] tfa_set_calibration_values\n",
 				__func__, tfa->dev_idx);
 
@@ -3975,8 +3968,8 @@ enum tfa98xx_error tfa_run_speaker_boost(struct tfa_device *tfa,
 			if (err)
 				pr_err("%s: set calibration values error = %d\n",
 					__func__, err);
-		}
 #endif /* TFADSP_CONFIGURE_AT_FIRST_DEVICE */
+		}
 	}
 
 	return err;
@@ -4005,6 +3998,14 @@ tfa_run_speaker_startup(struct tfa_device *tfa, int force, int profile)
 		if (err) {
 			pr_info("%s: tfa_run_startup error = %d\n",
 				__func__, err);
+			return err;
+		}
+
+		/* stop in simple init case, without stream */
+		if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0
+			&& tfa98xx_count_active_stream(BIT_CSTREAM) == 0) {
+			pr_info("%s: skip configuring when there's no stream\n",
+				__func__);
 			return err;
 		}
 
@@ -4301,6 +4302,7 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	struct tfa_device_list *dev = tfa_cont_device(tfa->cnt, tfa->dev_idx);
 	int i, noinit = 0, audfs = 0, fractdel = 0;
+	uint16_t value;
 	char prof_name[MAX_CONTROL_NAME] = {0};
 #if defined(REDUCED_REGISTER_SETTING)
 	int is_cold_amp;
@@ -4317,12 +4319,7 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 	is_cold_amp = tfa_is_cold_amp(tfa);
 	pr_info("%s: is_cold_amp %d, first_after_boot %d\n",
 		__func__, is_cold_amp, tfa->first_after_boot);
-#if defined(TFA_PRELOAD_SETTING_AT_PROBING)
-	if ((tfa->first_after_boot != 2)
-		&& (tfa->first_after_boot == 1 || is_cold_amp == 1))
-#else
 	if (tfa->first_after_boot || is_cold_amp == 1)
-#endif
 #endif /* REDUCED_REGISTER_SETTING */
 	{
 		/* process the device list
@@ -4337,8 +4334,10 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 
 		if (!noinit) {
 			/* Read AUDFS & FRACTDEL prior to (re)init. */
-			audfs = TFA_GET_BF(tfa, AUDFS);
-			fractdel = TFA_GET_BF(tfa, FRACTDEL);
+			value = (uint16_t)TFA_READ_REG(tfa, AUDFS);
+			audfs = TFA_GET_BF_VALUE(tfa, AUDFS, value);
+			fractdel = TFA_GET_BF_VALUE(tfa, FRACTDEL, value);
+
 			/* load the optimal TFA98XX in HW settings */
 			err = tfa98xx_init(tfa);
 			PRINT_ASSERT(err);
@@ -4348,8 +4347,10 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 			 * in case something else was given in cnt file,
 			 * profile below will apply this.
 			 */
-			TFA_SET_BF(tfa, AUDFS, audfs);
-			TFA_SET_BF(tfa, FRACTDEL, fractdel);
+			value = (uint16_t)TFA_READ_REG(tfa, AUDFS);
+			TFA_SET_BF_VALUE(tfa, AUDFS, audfs, &value);
+			TFA_SET_BF_VALUE(tfa, FRACTDEL, fractdel, &value);
+			TFA_WRITE_REG(tfa, AUDFS, value);
 		} else {
 			pr_debug("Warning: No init keyword found in the cnt file. Init is skipped!\n");
 		}
@@ -4373,14 +4374,8 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 #endif /* REDUCED_REGISTER_SETTING */
 
 #if defined(REDUCED_REGISTER_SETTING)
-#if defined(TFA_PRELOAD_SETTING_AT_PROBING)
-	if (((tfa->first_after_boot != 2)
-		&& (tfa->first_after_boot == 1 || is_cold_amp == 1))
-		|| (profile != tfa_dev_get_swprof(tfa)))
-#else
 	if ((tfa->first_after_boot || (is_cold_amp == 1))
 		|| (profile != tfa_dev_get_swprof(tfa)))
-#endif
 #endif /* REDUCED_REGISTER_SETTING */
 	{
 		/* also write register the settings from the default profile
@@ -4405,6 +4400,14 @@ enum tfa98xx_error tfa_run_startup(struct tfa_device *tfa, int profile)
 #if defined(REDUCED_REGISTER_SETTING)
 	tfa->first_after_boot = 0;
 #endif
+
+	/* stop in simple init case, without stream */
+	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0
+		&& tfa98xx_count_active_stream(BIT_CSTREAM) == 0) {
+		pr_info("%s: skip init_cf when there's no stream\n",
+			__func__);
+		goto tfa_run_startup_exit;
+	}
 
 #if defined(TFA_CHANGE_PCM_FORMAT)
 	/* update PCM format, if changed, before power up */
@@ -5262,7 +5265,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE) < 1) {
 		pr_info("%s: initialize active handle\n", __func__);
 		/* check activeness with profile */
-		tfa_set_active_handle(tfa, tfa->profile);
+		tfa_set_active_handle(tfa, next_profile);
 	}
 
 	if (tfa->active_handle != -1) {
@@ -5365,6 +5368,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 					__func__, cal_profile);
 				next_profile = cal_profile;
 			}
+			tfa->first_after_boot = 1;
 		} else {
 			pr_info("%s: keep using profile (%d) and use dummy value if unavailable\n",
 				__func__, next_profile);
@@ -5372,7 +5376,6 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 			if (tfa->is_probus_device)
 				tfa->reset_mtpex = 0;
 		}
-		tfa->first_after_boot = 1;
 	}
 
 	/* TfaRun_SpeakerBoost implies un-mute */
@@ -5419,6 +5422,15 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 			tfa_cont_device_name(tfa->cnt, tfa->dev_idx),
 			tfa_cont_profile_name(tfa->cnt, tfa->dev_idx,
 			next_profile));
+
+		/* stop in simple init case, without stream */
+		if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0
+			&& tfa98xx_count_active_stream(BIT_CSTREAM) == 0) {
+			pr_info("%s: skip operating when there's no stream\n",
+				__func__);
+			mutex_unlock(&dev_lock);
+			goto tfa_dev_start_exit;
+		}
 
 		/* Make sure internal oscillator is running
 		 * for DSP devices (non-dsp and max1 this is no-op)
