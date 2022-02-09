@@ -110,7 +110,6 @@ extern "C" {
  * The total wait time depends on device settings. Those
  * are application specific.
  */
-#define TFA98XX_LOADFW_NTRIES			20
 #define TFA98XX_WAITRESULT_NTRIES		40
 #define TFA98XX_WAITRESULT_NTRIES_LONG	2000
 
@@ -827,16 +826,9 @@ enum tfa98xx_error mem_read(struct tfa_device *tfa,
 
 enum tfa98xx_error dsp_partial_coefficients(struct tfa_device *tfa,
 	uint8_t *prev, uint8_t *next);
-
 #if defined(USE_TFA9894N2)
 int is_94_N2_device(struct tfa_device *tfa);
 #endif
-
-/*
- * Get manstate from device
- * @param tfa the device struct pointer
- */
-int tfa_get_manstate(struct tfa_device *tfa);
 
 /*
  * write/read raw msg functions:

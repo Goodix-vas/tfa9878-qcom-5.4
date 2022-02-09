@@ -64,7 +64,6 @@
 #endif
 
 #define DEFAULT_REF_TEMP 25
-#define TFA_NOT_FOUND -1
 
 enum instream_state {
 	BIT_PSTREAM = 1, /* b0 */
@@ -124,8 +123,6 @@ int tfa98xx_get_fssel(unsigned int rate);
 
 struct tfa_device *tfa98xx_get_tfa_device_from_index(int index);
 struct tfa_device *tfa98xx_get_tfa_device_from_channel(int channel);
-
-int tfa_get_channel_from_dev_idx(struct tfa_device *tfa, int dev_idx);
 
 int tfa98xx_count_active_stream(int stream_flag);
 

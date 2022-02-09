@@ -210,14 +210,12 @@ struct tfa_device {
 	int is_bypass;
 	int is_calibrating;
 	int is_configured;
-	int mtpex;
 	int reset_mtpex;
 	int stream_state; /* b0: pstream (Rx), b1: cstream (Tx), b2:SaaM */
 	int prev_samstream;
 	int first_after_boot;
 	int active_handle;
 	int active_count;
-	int swprof;
 	int ampgain;
 	int individual_msg;
 	int set_device;

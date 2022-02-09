@@ -18,8 +18,6 @@
 #define TFA98XX_CURRENTSENSE4_CTRL_CLKGATECFOFF (1 << 2)
 #define TFA98XX_CURRENTSENSE4 0x49
 
-#define TFA_SAVE_TRANSACTION
-
 /*********************/
 /* GLOBAL (Defaults) */
 /*********************/
@@ -192,7 +190,8 @@ static int tfa_get_mtpb(struct tfa_device *tfa)
 	return value;
 }
 
-static enum tfa98xx_error tfa_set_mute_nodsp(struct tfa_device *tfa, int mute)
+static enum tfa98xx_error
+tfa_set_mute_nodsp(struct tfa_device *tfa, int mute)
 {
 	(void)tfa;
 	(void)mute;
@@ -979,38 +978,20 @@ static enum tfa98xx_error tfa9878_specific(struct tfa_device *tfa)
 static int tfa9878_set_swprofile(struct tfa_device *tfa,
 	unsigned short new_value)
 {
-	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	int active_value = tfa_dev_get_swprof(tfa);
 
 	/* Set the new value in the struct */
 	tfa->profile = new_value - 1;
 
-#if defined(TFA_SAVE_TRANSACTION)
-	if (tfa->swprof != tfa->profile)
-		/* Set the new value in the hw register */
-		err = tfa_set_bf_volatile(tfa,
-			TFA9878_BF_SWPROFIL, new_value);
-
-	if (err == TFA98XX_ERROR_OK)
-		tfa->swprof = tfa->profile;
-#else
 	/* Set the new value in the hw register */
-	err = tfa_set_bf_volatile(tfa, TFA9878_BF_SWPROFIL, new_value);
-#endif /* TFA_SAVE_TRANSACTION */
+	tfa_set_bf_volatile(tfa, TFA9878_BF_SWPROFIL, new_value);
 
 	return active_value;
 }
 
 static int tfa9878_get_swprofile(struct tfa_device *tfa)
 {
-#if defined(TFA_SAVE_TRANSACTION)
-	if (tfa->swprof == -1)
-		tfa->swprof = tfa_get_bf(tfa, TFA9878_BF_SWPROFIL) - 1;
-
-	return tfa->swprof;
-#else
 	return tfa_get_bf(tfa, TFA9878_BF_SWPROFIL) - 1;
-#endif
 }
 
 static int tfa9878_set_swvstep(struct tfa_device *tfa,
@@ -1019,21 +1000,15 @@ static int tfa9878_set_swvstep(struct tfa_device *tfa,
 	/* Set the new value in the struct */
 	tfa->vstep = new_value - 1;
 
-#if !defined(TFA_SAVE_TRANSACTION)
 	/* Set the new value in the hw register */
 	tfa_set_bf_volatile(tfa, TFA9878_BF_SWVSTEP, new_value);
-#endif
 
 	return new_value;
 }
 
 static int tfa9878_get_swvstep(struct tfa_device *tfa)
 {
-#if defined(TFA_SAVE_TRANSACTION)
-	return tfa->vstep; /* vstep is not used */
-#else
 	return tfa_get_bf(tfa, TFA9878_BF_SWVSTEP) - 1;
-#endif
 }
 
 /* tfa98xx_dsp_system_stable

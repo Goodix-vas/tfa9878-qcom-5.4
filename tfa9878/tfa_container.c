@@ -2687,29 +2687,6 @@ int tfa_cont_is_tap_profile(struct tfa_device *tfa, int prof_idx)
 }
 
 /**
- * Is the profile a standby profile
- */
-int tfa_cont_is_standby_profile(struct tfa_device *tfa, int prof_idx)
-{
-	char prof_name[MAX_CONTROL_NAME] = {0};
-
-	if ((tfa->dev_idx < 0) || (tfa->dev_idx >= tfa->cnt->ndev))
-		return TFA_ERROR;
-
-	strlcpy(prof_name, tfa_cont_profile_name(tfa->cnt,
-		tfa->dev_idx, prof_idx), MAX_CONTROL_NAME);
-	/* Check if next profile is tap profile */
-	if (strnstr(prof_name, ".standby", strlen(prof_name)) != NULL) {
-		pr_debug("Using Standby profile: '%s'\n",
-			tfa_cont_profile_name(tfa->cnt,
-			tfa->dev_idx, prof_idx));
-		return 1;
-	}
-
-	return 0;
-}
-
-/**
  * Is the profile specific to device ?
  * @param dev_idx the index of the device
  * @param prof_idx the index of the profile
