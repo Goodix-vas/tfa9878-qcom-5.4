@@ -4119,13 +4119,29 @@ static void tfa98xx_container_loaded
 
 static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 {
+	int tries = 0, ret;
+
 	mutex_lock(&probe_lock);
 	tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_PENDING;
 	mutex_unlock(&probe_lock);
 
-	return request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
-		fw_name, tfa98xx->dev, GFP_KERNEL,
-		tfa98xx, tfa98xx_container_loaded);
+	do {
+		ret = request_firmware_nowait(THIS_MODULE,
+			FW_ACTION_HOTPLUG,
+			fw_name, tfa98xx->dev, GFP_KERNEL,
+			tfa98xx, tfa98xx_container_loaded);
+
+		/* wait until driver completes loading */
+		msleep_interruptible(20);
+		if (tfa98xx->dsp_fw_state == TFA98XX_DSP_FW_OK)
+			break;
+
+		msleep_interruptible(80);
+		tries++;
+	} while (tries < TFA98XX_LOADFW_NTRIES
+		&& tfa98xx->dsp_fw_state != TFA98XX_DSP_FW_OK);
+
+	return ret;
 }
 
 #if (defined(USE_TFA9891) || defined(USE_TFA9912))
