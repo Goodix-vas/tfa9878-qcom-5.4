@@ -390,12 +390,14 @@ void tfa_set_query_info(struct tfa_device *tfa)
 	tfa->is_cold = 1;
 	tfa->is_bypass = 0;
 	tfa->is_configured = 0;
+	tfa->mtpex = -1;
 	tfa->reset_mtpex = 0;
 	tfa->stream_state = 0;
 	tfa->prev_samstream = -1; /* not in use */
 	tfa->first_after_boot = 1;
 	tfa->active_handle = -1;
 	tfa->active_count = -1;
+	tfa->swprof = -1;
 	tfa->ampgain = -1;
 	tfa->individual_msg = 0;
 	tfa->fw_itf_ver[0] = 0xff;
@@ -3533,7 +3535,6 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	unsigned char bytes[2 * 3] = {0};
 	unsigned short value = 0, channel = 0;
-	int mtpex = 0;
 	static int need_cal, is_bypass, is_damaged;
 	struct tfa_device *ntfa;
 	int i;
@@ -3560,8 +3561,9 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 				&& (ntfa->active_handle != i))
 				continue;
 
-			mtpex = tfa_dev_mtp_get(ntfa, TFA_MTP_EX);
-			need_cal |= (mtpex == 0) ? 1 : 0;
+			if (ntfa->mtpex == -1)
+				ntfa->mtpex = tfa_dev_mtp_get(ntfa, TFA_MTP_EX);
+			need_cal |= (ntfa->mtpex == 0) ? 1 : 0;
 			is_bypass |= ntfa->is_bypass;
 			is_damaged |= ntfa->spkr_damaged;
 		}
@@ -3604,11 +3606,10 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 		return err;
 	}
 
-	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
 	channel = tfa98xx_get_cnt_bitfield(tfa,
 		TFA7x_FAM(tfa, TDMSPKS)) % MAX_CHANNELS;
 	pr_info("%s: dev %d, channel %d, MTPEX=%d\n",
-		__func__, tfa->dev_idx, channel, mtpex);
+		__func__, tfa->dev_idx, channel, tfa->mtpex);
 
 	value = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
 	pr_info("%s: extract from MTP - %d mOhms\n", __func__, value);
@@ -3625,7 +3626,7 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 
 	dsp_cal_value[channel] = TFA_ReZ_CALC(value, TFA_FW_ReZ_SHIFT);
 #if defined(CHECK_CALIBRATION_DATA_RANGE)
-	if (mtpex) {
+	if (tfa->mtpex) {
 		err = tfa_calibration_range_check(tfa, channel, value);
 		if (err) {
 			need_cal |= 1;
@@ -3670,7 +3671,9 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 #endif /* TFA_USE_DUMMY_CAL */
 
 #if !defined(TRACE_STATUS_AT_CALIBRATION)
-	if (tfa->verbose)
+	if (tfa->verbose && need_cal)
+#else
+	if (need_cal)
 #endif
 	{
 		/* check the configuration for cal profile */
@@ -3732,7 +3735,8 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 	/* If calibration is set to once we load from MTP, else send zero's */
 	if (need_cal == 0) {
 		pr_info("%s: last dev %d - MTPEX=%d\n",
-			__func__, tfa->dev_idx, mtpex);
+			__func__, tfa->dev_idx, tfa->mtpex);
+
 		if (tfa->dev_count == 1) { /* mono */
 			dsp_cal_value[1] = dsp_cal_value[0];
 		} else if (tfa->dev_count == 2) { /* stereo */
@@ -3986,7 +3990,7 @@ tfa_run_speaker_startup(struct tfa_device *tfa, int force, int profile)
 #endif
 	struct tfa_device *tfa0 = NULL;
 #if defined(TFA_START_CAL_IN_OPERATING_STATE)
-	int mtpex = 0, tries = 0;
+	int tries = 0;
 	int tfa_state;
 #endif
 
@@ -4022,13 +4026,14 @@ tfa_run_speaker_startup(struct tfa_device *tfa, int force, int profile)
 	}
 
 #if defined(TFA_START_CAL_IN_OPERATING_STATE)
-	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
+	if (tfa->mtpex == -1)
+		tfa->mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
 #if defined(TFA_USE_DUMMY_CAL)
-	if ((mtpex == 0 || tfa->reset_mtpex)
+	if ((tfa->mtpex == 0 || tfa->reset_mtpex)
 		&& (tfa->state != TFA_STATE_OPERATING)
 		&& (tfa->active_count == tfa->dev_count))
 #else
-	if ((mtpex == 0 || tfa->reset_mtpex)
+	if ((tfa->mtpex == 0 || tfa->reset_mtpex)
 		&& (tfa->state != TFA_STATE_OPERATING))
 #endif
 	{
@@ -4544,28 +4549,31 @@ enum tfa98xx_error tfa_run_unmute(struct tfa_device *tfa)
 {
 	enum tfa98xx_error ret = TFA98XX_ERROR_OK;
 	enum tfa_error err = tfa_error_ok;
-#if defined(TFA_RAMPDOWN_BEFORE_MUTE)
-	int i = 0, cur_ampe;
 
-	cur_ampe = TFA_GET_BF(tfa, AMPE);
-	if (cur_ampe == 0)
-		tfa_gain_restore(tfa, 0, -1);
-	else
-		for (i = 0; i < RAMPDOWN_MAX; i++) {
-			ret = tfa_gain_restore(tfa, i, RAMPDOWN_MAX);
-			if (ret == TFA98XX_ERROR_OTHER)
-				break;
+#if defined(TFA_RAMPDOWN_BEFORE_MUTE)
+	if (tfa->ampgain != -1) {
+		int i = 0, cur_ampe;
+
+		cur_ampe = TFA_GET_BF(tfa, AMPE);
+		if (cur_ampe == 0)
+			tfa_gain_restore(tfa, 0, -1);
+		else
+			for (i = 0; i < RAMPDOWN_MAX; i++) {
+				ret = tfa_gain_restore(tfa, i, RAMPDOWN_MAX);
+				if (ret == TFA98XX_ERROR_OTHER)
+					break;
 #if defined(RAMPING_WITH_USLEEP)
-			usleep_range(RAMPING_INTERVAL * 1000,
-				RAMPING_INTERVAL * 1000 + 5);
+				usleep_range(RAMPING_INTERVAL * 1000,
+					RAMPING_INTERVAL * 1000 + 5);
 #else
-			/*
-			 * practically, msleep takes 20 msec
-			 * need to use usleep_range if it works
-			 */
-			msleep_interruptible(RAMPING_INTERVAL);
+				/*
+				 * practically, msleep takes 20 msec
+				 * need to use usleep_range if it works
+				 */
+				msleep_interruptible(RAMPING_INTERVAL);
 #endif
-		}
+			}
+	}
 #endif /* TFA_RAMPDOWN_BEFORE_MUTE */
 
 	/* signal the TFA98XX to mute */
@@ -4642,6 +4650,18 @@ enum tfa98xx_error tfa_gain_restore(struct tfa_device *tfa,
 		return TFA98XX_ERROR_BAD_PARAMETER;
 	}
 
+	if (count < 0) { /* direct set */
+		pr_debug("%s: direct set ampgain (0 to %d)\n",
+			__func__, tfa->ampgain);
+		err = TFA7x_SET_BF(tfa, AMPGAIN, tfa->ampgain);
+		if (err)
+			pr_err("%s: error in setting AMPGAIN\n",
+				__func__);
+
+		return err;
+	}
+
+	/* stepwise set */
 	if (step == 0) {
 		cur_ampgain = TFA7x_GET_BF(tfa, AMPGAIN);
 		if ((cur_ampgain == tfa->ampgain)
@@ -4650,20 +4670,13 @@ enum tfa98xx_error tfa_gain_restore(struct tfa_device *tfa,
 				__func__, cur_ampgain, tfa->ampgain);
 			return TFA98XX_ERROR_OTHER;
 		}
-		if (count < 0)
-			pr_debug("%s: direct set ampgain (0 to %d)\n",
-				__func__, tfa->ampgain);
-		else
-			pr_debug("%s: restore ampgain (%d)\n",
-				__func__, tfa->ampgain);
+		pr_debug("%s: restore ampgain (%d)\n",
+			__func__, tfa->ampgain);
 	}
 
 	/* ramp up amplifier gain for "count" msec */
-	if (count < 0) /* direct set */
-		err = TFA7x_SET_BF(tfa, AMPGAIN, tfa->ampgain);
-	else /* stepwise set */
-		err = TFA7x_SET_BF(tfa, AMPGAIN,
-			tfa->ampgain * (step + 1) / count);
+	err = TFA7x_SET_BF(tfa, AMPGAIN,
+		tfa->ampgain * (step + 1) / count);
 	if (err)
 		pr_err("%s: error in setting AMPGAIN\n",
 			__func__);
@@ -5239,8 +5252,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 	int next_profile, int vstep)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
-	int active_profile = -1;
-	int mtpex = 0, cal_profile = -1;
+	int active_profile = -1, cal_profile = -1;
 	static int tfa98xx_log_start_cnt;
 	int forced = 0;
 	int tfa_state_before, tfa_state;
@@ -5344,10 +5356,11 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 	tfa->ampgain = -1;
 #endif /* TFA_RAMPDOWN_BEFORE_MUTE */
 
-	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
-	if (mtpex == 0 || tfa->reset_mtpex) {
+	if (tfa->mtpex == -1)
+		tfa->mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
+	if (tfa->mtpex == 0 || tfa->reset_mtpex) {
 		pr_info("%s: dev %d, MTPEX=%d%s\n",
-			__func__, tfa->dev_idx, mtpex,
+			__func__, tfa->dev_idx, tfa->mtpex,
 			(tfa->reset_mtpex) ? " (forced)" : "");
 		if (!tfa->is_probus_device) {
 			pr_info("%s: set cold by force in non-probus case\n",
@@ -5385,8 +5398,6 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 	pr_debug("Starting device [%s]\n",
 		tfa_cont_device_name(tfa->cnt, tfa->dev_idx));
 
-	err = show_current_state(tfa);
-
 	if (tfa->tfa_family == 1) { /* TODO move this to ini file */
 		/* Enable I2S output on TFA1 devices without TDM */
 		err = tfa98xx_aec_output(tfa, 1);
@@ -5408,6 +5419,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa,
 			tfa_cont_device_name(tfa->cnt, tfa->dev_idx),
 			next_profile);
 
+		/* need to update before checking is_cold */
 		tfa_state_before = tfa_dev_get_state(tfa);
 
 		/* Check if we need coldstart or ACS is set */
@@ -6331,10 +6343,9 @@ int tfa_is_cold(struct tfa_device *tfa)
 			else /* no dsp or cold */
 				value = 1; /* cold */
 #else
-			int tfa_state;
-
-			tfa_state = tfa_dev_get_state(tfa);
-			if (tfa_state == TFA_STATE_OPERATING)
+			/* need to update before checking is_cold */
+			/* tfa_dev_get_state(tfa); */
+			if (tfa->state == TFA_STATE_OPERATING)
 				value = 0; /* warm */
 			else
 				value = 1; /* cold */
@@ -6357,6 +6368,11 @@ int tfa_is_cold(struct tfa_device *tfa)
 int tfa_needs_reset(struct tfa_device *tfa)
 {
 	int value;
+
+#if defined(TFA_USE_MANSTATE_TO_CHECK_COLD)
+	/* need to update before checking is_cold */
+	tfa_dev_get_state(tfa);
+#endif
 
 	/* checks if the DSP commands SetAlgoParams and SetMBDrc
 	 * need a DSP reset (now: at coldstart or during calibration)
@@ -7078,7 +7094,7 @@ enum tfa_error tfa_dev_set_state(struct tfa_device *tfa,
 		tfa98xx_set_mute(tfa, TFA98XX_MUTE_OFF);
 
 	/* tfa->state = state; */ /* to correct with real state of device */
-	tfa->state = tfa_dev_get_state(tfa);
+	tfa_dev_get_state(tfa);
 
 	return tfa_error_ok;
 }
@@ -7185,8 +7201,11 @@ enum tfa_error tfa_dev_mtp_set(struct tfa_device *tfa,
 		err = tfa98xx_set_mtp(tfa, (uint16_t)
 			(value << TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_POS),
 			TFA98XX_KEY2_PROTECTED_MTP0_MTPEX_MSK);
-		if (err == tfa_error_ok && value == 0)
-			tfa->reset_mtpex = 0;
+		if (err == tfa_error_ok) {
+			tfa->mtpex = value;
+			if (value == 0)
+				tfa->reset_mtpex = 0;
+		}
 		break;
 	case TFA_MTP_RE25:
 	case TFA_MTP_RE25_PRIM:
@@ -7328,11 +7347,6 @@ enum tfa98xx_error tfa7x_status(struct tfa_device *tfa)
 		|| TFA7x_GET_BF_VALUE(tfa, VDDS, val)))
 		pr_err("Misc errors detected: STATUS_FLAG0 = 0x%x\n", val);
 
-	value = TFA7x_READ_REG(tfa, PLLS); /* STATUS_FLAGS1 */
-	if (value < 0)
-		return -value;
-	val = (uint16_t)value;
-
 	snprintf(reg_state, 50, "device [%d]", tfa->dev_idx);
 
 #if defined(USE_TFA9878)
@@ -7370,6 +7384,11 @@ enum tfa98xx_error tfa7x_status(struct tfa_device *tfa)
 		break;
 	}
 	pr_debug("%s: %s\n", __func__, reg_state);
+
+	value = TFA7x_READ_REG(tfa, PLLS); /* STATUS_FLAGS1 */
+	if (value < 0)
+		return -value;
+	val = (uint16_t)value;
 
 	if (!TFA7x_GET_BF_VALUE(tfa, SWS, val)) {
 		if (idle_power)
