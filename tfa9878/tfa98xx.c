@@ -4093,8 +4093,13 @@ static void tfa98xx_container_loaded
 		tfa98xx_set_stream_state(tfa98xx->tfa, 0);
 		ret = tfa98xx_tfa_start(tfa98xx,
 			tfa98xx->profile, tfa98xx->vstep);
-		if (ret == TFA98XX_ERROR_NOT_SUPPORTED)
+		if (ret == TFA98XX_ERROR_NOT_SUPPORTED) {
 			tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_FAIL;
+		} else {
+			/* reset cold amp state */
+			if (tfa98xx->tfa->tfa_family == 2)
+				TFA_SET_BF(tfa98xx->tfa, MANSCONF, 1);
+		}
 		mutex_unlock(&tfa98xx->dsp_lock);
 	}
 #endif /* TFA_PRELOAD_SETTING_AT_PROBING */
